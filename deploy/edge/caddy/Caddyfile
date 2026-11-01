@@ -77,7 +77,7 @@
 	}
 }
 
-cg.{$DOMAIN} {    # Home Gateway portal
+cg.{$DOMAIN} {    # WAF-OPNsense portal
 	import access_log
 	route {
 		import cf_only

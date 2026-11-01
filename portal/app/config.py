@@ -16,7 +16,7 @@ def _networks(value: str) -> list:
 @dataclass(frozen=True)
 class Settings:
     rp_id: str = field(default_factory=lambda: _env("PORTAL_RP_ID", "localhost"))
-    rp_name: str = field(default_factory=lambda: _env("PORTAL_RP_NAME", "Home Gateway"))
+    rp_name: str = field(default_factory=lambda: _env("PORTAL_RP_NAME", "WAF-OPNsense"))
     origin: str = field(default_factory=lambda: _env("PORTAL_ORIGIN", "http://localhost:8000"))
     data_dir: Path = field(default_factory=lambda: Path(_env("PORTAL_DATA_DIR", "./data")))
     # Fernet key used to encrypt TOTP secrets at rest. Generate with `python -m app.cli gen-key`.
