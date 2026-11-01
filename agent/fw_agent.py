@@ -30,13 +30,19 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 log = logging.getLogger("fw-agent")
 
 DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
 
 
 # =============================================================== helpers
+
+# rc.d starts the daemon with a minimal PATH; php and configctl live under /usr/local.
+_PATH = ["/sbin", "/bin", "/usr/sbin", "/usr/bin", "/usr/local/sbin", "/usr/local/bin"]
+if os.pathsep == ":":
+    os.environ["PATH"] = ":".join(dict.fromkeys(_PATH + [d for d in os.environ.get("PATH", "").split(":") if d]))
+
 
 def run(cmd, timeout=20, check=False, input_data=None, cwd=None):
     try:
