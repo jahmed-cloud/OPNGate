@@ -49,12 +49,18 @@ def test_collapsed_map_only_loads_counts_and_open_map_is_stable(browser, monkeyp
     assert not any('SELECT * FROM clients' in sql for sql in queries)
     browser.cookies.set('flow_open', 'LAN')
     first = browser.get('/api/flow')
-    order = [d['mac'] for d in first.context['flow_segments'][0]['devices']]
-    assert order == sorted(order)
+    segment = first.context['flow_segments'][0]
+    # Busy Beta is shown; quiet Alpha folds into the idle row until asked for.
+    assert [d['hostname'] for d in segment['devices']] == ['Beta'] and segment['idle'] == 1 and segment['more'] == 0
+    assert 'data-segment="LAN~idle"' in first.text and 'Show 1 idle device on LAN' in first.text
+    browser.cookies.set('flow_open', 'LAN,LAN~idle')
+    assert [d['hostname'] for d in browser.get('/api/flow').context['flow_segments'][0]['devices']] == ['Beta', 'Alpha']
+    # The next map refresh puts the busiest device first.
     db.run('UPDATE clients SET down_bps=9999999 WHERE hostname=?', 'Alpha')
+    browser.cookies.set('flow_open', 'LAN')
     second = browser.get('/api/flow')
-    assert [d['mac'] for d in second.context['flow_segments'][0]['devices']] == order
-    assert 'data-refresh-section="device-00:11:22:33:44:01"' in second.text
+    assert [d['hostname'] for d in second.context['flow_segments'][0]['devices']] == ['Alpha', 'Beta']
+    assert 'data-refresh-section="device-00:11:22:33:44:01"' in second.text and 'idle device' not in second.text
 
 
 def test_history_refresh_leaves_client_owned_flow_untouched(browser, monkeypatch):
@@ -82,7 +88,7 @@ def test_operator_names_device_and_picks_icon(browser):
     r = browser.post('/clients/label', data=form, headers=H, follow_redirects=False)
     assert r.status_code == 303 and r.headers['location'] == '/'
     assert dict(db.one('SELECT name, icon FROM device_labels WHERE mac=?', '00:11:22:33:44:01')) == {'name': 'Kids tablet', 'icon': 'tablet'}
-    browser.cookies.set('flow_open', 'LAN')
+    browser.cookies.set('flow_open', 'LAN,LAN~idle')
     page = browser.get('/api/flow').text
     assert 'Kids tablet' in page and 'Alpha' not in page.split('<svg')[1].split('</svg>')[0].replace('Alpha ·', '')
     clients = browser.get('/clients?q=kids').text
@@ -101,6 +107,11 @@ def test_busy_network_uses_compact_rows_for_120_devices(browser):
         db.run('INSERT INTO clients(mac,hostname,segment,online,first_seen,last_seen,down_bps,up_bps) VALUES (?,?,?,1,?,?,?,?)',
                f'00:aa:00:00:{i // 256:02x}:{i % 256:02x}', f'device-{i:03d}-with-a-long-hostname', 'LAN', db.now(), db.now(), i * 1000, 10)
     browser.cookies.set('flow_open', 'LAN')
+    folded = browser.get('/api/flow').context['flow_segments'][0]
+    assert len(folded['devices']) == 119 and folded['idle'] == 3  # device-000, device-001 and Alpha are quiet
+    rates = [d['down_bps'] + (d['up_bps'] or 0) for d in folded['devices']]
+    assert rates == sorted(rates, reverse=True)
+    browser.cookies.set('flow_open', 'LAN,LAN~idle')
     r = browser.get('/api/flow')
     segment = r.context['flow_segments'][0]
     assert len(segment['devices']) == 122 and segment['compact'] and segment['more'] == 0
