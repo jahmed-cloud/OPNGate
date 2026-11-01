@@ -173,11 +173,15 @@ def clients(request: Request, session: Session = Depends(require_user)):
 @router.get("/traffic")
 def traffic(request: Request, session: Session = Depends(require_user)):
     key, _ = _window(request)
-    data = metrics.window(key)
+    now = db.now()
+    data = metrics.window(key, now)
     ts, interfaces = db.get_snapshot("interfaces", [])
     rx = [p["rx_bps"] for p in data["points"] if isinstance(p.get("rx_bps"), (int, float))]
     tx = [p["tx_bps"] for p in data["points"] if isinstance(p.get("tx_bps"), (int, float))]
-    stats = {"rx_now": rx[-1] if rx else None, "tx_now": tx[-1] if tx else None,
+    latest = db.one("SELECT ts, rx_bps, tx_bps FROM samples WHERE ts <= ? ORDER BY ts DESC LIMIT 1", now)
+    stats = {"rx_now": latest["rx_bps"] if latest else None, "tx_now": latest["tx_bps"] if latest else None,
+             "updated": latest["ts"] if latest else None,
+             "stale": latest is None or now - latest["ts"] >= 120,
              "rx_avg": sum(rx) / len(rx) if rx else None, "tx_avg": sum(tx) / len(tx) if tx else None}
     # From the devices' side: on the WAN, in is download; on an inside interface, out is the devices' download.
     ifaces = []

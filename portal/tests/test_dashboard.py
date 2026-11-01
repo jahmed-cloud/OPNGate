@@ -51,6 +51,26 @@ def sample(ts, wan=1, latency=10, loss=0, rx=1000, tx=500):
            ts, wan, latency, loss, rx, tx)
 
 
+def test_traffic_latest_rates_are_raw_and_independent_of_history_range(client, monkeypatch):
+    now = 1_800_000_000
+    monkeypatch.setattr(db, "now", lambda: now)
+    sign_in(client)
+    sample(now - 30, rx=100, tx=50)
+    sample(now, rx=9000, tx=3000)
+    for key in ("1h", "24h", "30d"):
+        page = client.get("/traffic?range=" + key)
+        stats = page.context["stats"]
+        assert stats["rx_now"] == 9000 and stats["tx_now"] == 3000
+        assert stats["updated"] == now and stats["stale"] is False
+    # Never substitute an old known rate for a new missing observation.
+    sample(now + 30, rx=None, tx=None)
+    monkeypatch.setattr(db, "now", lambda: now + 30)
+    stats = client.get("/traffic").context["stats"]
+    assert stats["rx_now"] is None and stats["tx_now"] is None
+    monkeypatch.setattr(db, "now", lambda: now + 200)
+    assert client.get("/traffic").context["stats"]["stale"] is True
+
+
 def test_month_aggregates_in_sql_to_at_most_240_rows(monkeypatch):
     now = db.now()
     with db.tx() as conn:

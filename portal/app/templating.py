@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
-from . import devices
+from . import devices, interface_icons
 from .config import settings
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -481,10 +481,15 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
         elif not s.get("devices") and not s.get("more"):
             parts.append(f'<text class="sub" x="636" y="{sy + 4}">No devices online</text>')
         is_open = s.get("open", True)
+        network_kind = interface_icons.kind(s["name"], s.get("iface"))
+        network_label = interface_icons.LABELS[network_kind]
         parts.append(f'<a class="seg-toggle" href="#" data-segment="{e(s["name"])}" role="button" aria-expanded="{"true" if is_open else "false"}" '
-                     f'aria-label="{"Hide" if is_open else "Show"} devices on {e(s["name"])}">'
+                     f'aria-label="{"Hide" if is_open else "Show"} devices on {e(s["name"])} · {network_label}">'
                      f'<g class="node segment{" open" if is_open else ""}"><rect x="420" y="{sy - 34}" width="140" height="68" rx="14"/>'
-                     f'<text class="title" x="434" y="{sy - 11}">{e(_short(s["name"], 10))} <tspan class="count">{count}</tspan></text>'
+                     f'<title>{e(s["name"])} · {network_label} · {e(s.get("iface") or "")} · {count} devices</title>'
+                     f'<path class="interface-glyph" transform="translate(431 {sy - 27}) scale(.75)" d="{interface_icons.ICONS[network_kind]}"/>'
+                     f'<text class="title" x="454" y="{sy - 11}"{_fit(_short(s["name"], 8), 12.5, 58)}>{e(_short(s["name"], 8))}</text>'
+                     f'<text class="count" x="533" y="{sy - 11}" text-anchor="end"{_fit(str(count), 12, 18)}>{count}</text>'
                      f'<path class="chevron" d="{"M538 " + str(sy - 18) + " l5 5 5 -5" if is_open else "M540 " + str(sy - 21) + " l5 5 -5 5"}"/>'
                      f'<text class="sub rate-line" x="434" y="{sy + 8}"{_fit("↓ " + fmt_bps(s.get("down_bps")), 11.5, 112)}>'
                      f'<tspan class="arr down">↓</tspan> {e(fmt_bps(s.get("down_bps")))}</text>'
@@ -511,4 +516,11 @@ def device_icon(client) -> Markup:
                   f'<title>{devices.LABELS[what]}</title><path d="{devices.ICONS[what]}"/></svg>')
 
 
-templates.env.globals.update(traffic_chart=traffic_chart, rate_bars=rate_bars, block_lists=devices.BLOCK_LISTS, device_icon=device_icon, sparkline=sparkline, time_chart=time_chart, waf_chart=waf_chart, uptime_bar=uptime_bar, flow_map=flow_map)
+def interface_icon(segment="", interface="", wan=False):
+    what = interface_icons.kind(segment, interface, wan)
+    label = interface_icons.LABELS[what]
+    return Markup(f'<svg class="interface-icon" viewBox="0 0 24 24" role="img" aria-label="{label}">'
+                  f'<title>{label}</title><path d="{interface_icons.ICONS[what]}"/></svg>')
+
+
+templates.env.globals.update(interface_icon=interface_icon, traffic_chart=traffic_chart, rate_bars=rate_bars, block_lists=devices.BLOCK_LISTS, device_icon=device_icon, sparkline=sparkline, time_chart=time_chart, waf_chart=waf_chart, uptime_bar=uptime_bar, flow_map=flow_map)
