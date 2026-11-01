@@ -49,4 +49,13 @@ assert.equal(main.childNodes.length,2); assert.equal(main.firstChild,metrics); a
 const mixed=new Node('main',{},[new Node('div'),new Node('#text',{value:'old'}),new Node('b')]);
 ctx.patchChildren(mixed,new Node('main',{},[new Node('p'),new Node('#text',{value:'new'})]));
 assert.equal(mixed.childNodes.length,2);assert.equal(mixed.firstChild.nodeName,'p');assert.equal(mixed.childNodes[1].nodeValue,'new');
+const flow = new Node('section',{'data-client-owned':'','data-refresh-section':'overview-8'},[chart.cloneNode()]);
+const flowSvg = flow.firstChild.firstChild;
+ctx.patchNode(flow,new Node('section',{'data-client-owned':'','data-refresh-section':'overview-8'}));
+assert.equal(flow.firstChild.firstChild,flowSvg); // History's placeholder leaves topology mounted.
+const updatedFlow = flow.cloneNode();
+updatedFlow.firstChild.firstChild.firstChild.attrs.d='M0 0L3 3';
+ctx.patchNode(flow,updatedFlow,true); // Only a map response may reconcile the owned panel.
+assert.equal(flow.firstChild.firstChild,flowSvg);
+assert.equal(flowSvg.firstChild.attrs.d,'M0 0L3 3');
 console.log('PASS: keyed insertion/reordering/removal, SVG identity and path updates, mixed-node replacement');

@@ -43,7 +43,7 @@
   {% for i in interfaces %}
     <div class="iface{{ ' wan' if i.wan }}">
       <div class="iface-head"><span class="iface-title">{{ interface_icon(i.segment, i.name, i.wan) }}<strong title="{{ i.segment or i.name }}">{{ i.segment or i.name }}</strong></span><span class="mono small muted">{{ i.name }}</span></div>
-      {{ rate_bars(i.down, i.up, peak_iface) }}
+      {{ rate_bars(i.down, i.up, peak_iface, i.name, i.wan) }}
       <div class="iface-rates"><span class="down" data-live-rate="{{ 'rx_bps' if i.wan else 'tx_bps' }}" data-live-interface="{{ i.name }}" data-live-prefix="↓ ">↓ {{ i.down | bps }}</span><span class="up" data-live-rate="{{ 'tx_bps' if i.wan else 'rx_bps' }}" data-live-interface="{{ i.name }}" data-live-prefix="↑ ">↑ {{ i.up | bps }}</span></div>
       {% if i.wan %}<div class="iface-foot"><span class="small muted">Site blocks apply to the inside networks</span></div>
       {% else %}{% set seg = i.segment or i.name %}

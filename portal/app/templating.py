@@ -274,11 +274,12 @@ def traffic_chart(points, start, end) -> Markup:
     return Markup("".join(out))
 
 
-def rate_bars(down, up, high) -> Markup:
+def rate_bars(down, up, high, interface=None, wan=False) -> Markup:
     """Two thin bars (download, upload) scaled to the busiest interface; SVG so the CSP holds."""
     high = max(1.0, float(high or 0))
     w = lambda v: max(1.5, min(1.0, float(v or 0) / high) * 200)  # noqa: E731
-    return Markup('<svg class="rate-bars" viewBox="0 0 200 22" preserveAspectRatio="none" aria-hidden="true">'
+    marker = f' data-live-bars="{html.escape(str(interface), quote=True)}" data-bars-wan="{str(wan).lower()}"' if interface else ""
+    return Markup(f'<svg class="rate-bars"{marker} viewBox="0 0 200 22" preserveAspectRatio="none" aria-hidden="true">'
                   f'<rect class="track" x="0" y="2" width="200" height="7" rx="3.5"/><rect class="down" x="0" y="2" width="{w(down):.1f}" height="7" rx="3.5"/>'
                   f'<rect class="track" x="0" y="13" width="200" height="7" rx="3.5"/><rect class="up" x="0" y="13" width="{w(up):.1f}" height="7" rx="3.5"/></svg>')
 
@@ -355,7 +356,7 @@ def _flow_level(bps) -> int:
     return 0 if bps < 2_000 else 1 if bps < 1_000_000 else 2 if bps < 25_000_000 else 3
 
 
-def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="") -> str:
+def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="", key="", interface=None, wan=False) -> str:
     """Two curved lanes between nodes: download (towards the devices) and upload (back out).
     Dash animation speed shows the rate; idle links stay still. Classes only, so the CSP holds."""
     out = []
@@ -363,8 +364,11 @@ def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="") -> str:
     for lane, bps, off in (("down", down_bps, -gap), ("up", up_bps, gap)):
         mx = (x1 + x2) / 2
         d = f"M{x1},{y1 + off} C{mx},{y1 + off} {mx},{y2 + off} {x2},{y2 + off}"
-        out.append(f'<path class="lane {lane} {extra}" d="{d}"/>')
-        out.append(f'<path class="flow {lane} {extra} lvl-{_flow_level(bps)}" d="{d}"/>')
+        ident = html.escape(str(key), quote=True)
+        live = (f' data-flow-interface="{html.escape(str(interface), quote=True)}" data-flow-rate="'
+                f'{"rx_bps" if (lane == "down") == wan else "tx_bps"}"') if interface else ""
+        out.append(f'<path data-refresh-section="lane-{ident}-{lane}" class="lane {lane} {extra}" d="{d}"/>')
+        out.append(f'<path data-refresh-section="flow-{ident}-{lane}" class="flow {lane} {extra} lvl-{_flow_level(bps)}"{live} d="{d}"/>')
     return "".join(out)
 
 
@@ -402,6 +406,11 @@ def _rates(down, up, sep="   ") -> str:
             f'<tspan class="arr up">↑</tspan> {html.escape(fmt_bps(up))}')
 
 
+def _live_value(value, field, interface=None):
+    attribute = f' data-live-interface="{html.escape(str(interface), quote=True)}"' if interface else ""
+    return f'<tspan data-live-rate="{field}"{attribute}>{html.escape(fmt_bps(value))}</tspan>'
+
+
 def _short(text, n) -> str:
     text = str(text or "")
     return text if len(text) <= n else text[: n - 1] + "…"
@@ -413,16 +422,16 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
     height = height or flow_layout(segments)
     mid = height / 2
     e = html.escape
-    parts = [f'<svg class="flowmap" viewBox="0 0 {FLOW_WIDTH} {height}" role="img" aria-label="Network traffic flow down to each device">']
+    parts = [f'<svg class="flowmap" data-refresh-section="flow-svg" viewBox="0 0 {FLOW_WIDTH} {height}" role="img" aria-label="Network traffic flow down to each device">']
     state = gw.get("state") or ("online" if gw.get("online") is True else "offline" if gw.get("online") is False else "unknown")
     up = state == "online"
     # Internet <-> firewall
-    parts.append(_flow_pair(108, mid, 200, mid, wan.get("rx_bps"), wan.get("tx_bps")))
-    parts.append(f'<text class="rate" x="154" y="{mid - 16}" text-anchor="middle">↓ {e(fmt_bps(wan.get("rx_bps")))}</text>')
-    parts.append(f'<text class="rate up" x="154" y="{mid + 26}" text-anchor="middle">↑ {e(fmt_bps(wan.get("tx_bps")))}</text>')
-    parts.append(f'<g class="node internet {"ok" if up else "bad" if state == "offline" else "unknown"}"><circle cx="60" cy="{mid}" r="48"/>'
+    parts.append(_flow_pair(108, mid, 200, mid, wan.get("rx_bps"), wan.get("tx_bps"), key="wan", interface=wan.get("name"), wan=True))
+    parts.append(f'<text class="rate" x="154" y="{mid - 16}" text-anchor="middle">↓ {_live_value(wan.get("rx_bps"), "rx_bps")}</text>')
+    parts.append(f'<text class="rate up" x="154" y="{mid + 26}" text-anchor="middle">↑ {_live_value(wan.get("tx_bps"), "tx_bps")}</text>')
+    parts.append(f'<g data-flow-gateway class="node internet {"ok" if up else "bad" if state == "offline" else "unknown"}"><circle cx="60" cy="{mid}" r="48"/>'
                  f'<text class="title" x="60" y="{mid - 4}" text-anchor="middle">Internet</text>'
-                 f'<text class="sub" x="60" y="{mid + 16}" text-anchor="middle">{e(state)}</text></g>')
+                 f'<text data-gateway-status class="sub" x="60" y="{mid + 16}" text-anchor="middle">{e(state)}</text></g>')
     latency = gw.get("latency_ms")
     parts.append(f'<g class="node firewall"><rect x="200" y="{mid - 50}" width="150" height="100" rx="18"/>'
                  f'<text class="title" x="275" y="{mid - 16}" text-anchor="middle">Firewall</text>'
@@ -431,7 +440,7 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
                  f'{e(f"{latency:.0f} ms to internet" if isinstance(latency, (int, float)) else "")}</text></g>')
     for s in segments:
         sy = s["y"]
-        parts.append(_flow_pair(350, mid, 420, sy, s.get("down_bps"), s.get("up_bps")))
+        parts.append(_flow_pair(350, mid, 420, sy, s.get("down_bps"), s.get("up_bps"), key=s.get("iface") or s["name"], interface=s.get("iface")))
         for d in s.get("devices") or []:
             dy = d["y"]
             paused = bool(d.get("paused"))
@@ -439,7 +448,7 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
             if paused:
                 parts.append(f'<path class="lane blocked" d="M560,{sy} C595,{sy} 595,{dy} 630,{dy}"/>')
             else:
-                parts.append(_flow_pair(560, sy, 630, dy, d.get("down_bps"), d.get("up_bps"), "dev"))
+                parts.append(_flow_pair(560, sy, 630, dy, d.get("down_bps"), d.get("up_bps"), "dev", key=d["mac"]))
             tags = []
             if paused:
                 tags.append(("paused", "Paused"))
@@ -459,7 +468,7 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
             plain = "paused" if paused else f'↓ {fmt_bps(d.get("down_bps"))}   ↑ {fmt_bps(d.get("up_bps"))}'
             speeds = "paused" if paused else _rates(d.get("down_bps"), d.get("up_bps"))
             what = devices.kind(d)
-            parts.append(f'<g class="node device {kind}"><title>{e(d["label"])} · {e(devices.LABELS[what])} · {e(d.get("ip") or "")} · {e(d["mac"])}</title>'
+            parts.append(f'<g data-refresh-section="device-{e(d["mac"])}" class="node device {kind}"><title>{e(d["label"])} · {e(devices.LABELS[what])} · {e(d.get("ip") or "")} · {e(d["mac"])}</title>'
                          f'<rect x="630" y="{dy - 20}" width="250" height="40" rx="10"/>'
                          f'<rect class="kind-bg" x="637" y="{dy - 13}" width="26" height="26" rx="7"/>'
                          f'<path class="kind" transform="translate(641 {dy - 9}) scale(.75)" d="{devices.ICONS[what]}"/>'
@@ -483,7 +492,7 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
         is_open = s.get("open", True)
         network_kind = interface_icons.kind(s["name"], s.get("iface"))
         network_label = interface_icons.LABELS[network_kind]
-        parts.append(f'<a class="seg-toggle" href="#" data-segment="{e(s["name"])}" role="button" aria-expanded="{"true" if is_open else "false"}" '
+        parts.append(f'<a data-refresh-section="segment-{e(s.get("iface") or s["name"])}" class="seg-toggle" href="#" data-segment="{e(s["name"])}" role="button" aria-expanded="{"true" if is_open else "false"}" '
                      f'aria-label="{"Hide" if is_open else "Show"} devices on {e(s["name"])} · {network_label}">'
                      f'<g class="node segment{" open" if is_open else ""}"><rect x="420" y="{sy - 34}" width="140" height="68" rx="14"/>'
                      f'<title>{e(s["name"])} · {network_label} · {e(s.get("iface") or "")} · {count} devices</title>'
@@ -492,9 +501,9 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
                      f'<text class="count" x="533" y="{sy - 11}" text-anchor="end"{_fit(str(count), 12, 18)}>{count}</text>'
                      f'<path class="chevron" d="{"M538 " + str(sy - 18) + " l5 5 5 -5" if is_open else "M540 " + str(sy - 21) + " l5 5 -5 5"}"/>'
                      f'<text class="sub rate-line" x="434" y="{sy + 8}"{_fit("↓ " + fmt_bps(s.get("down_bps")), 11.5, 112)}>'
-                     f'<tspan class="arr down">↓</tspan> {e(fmt_bps(s.get("down_bps")))}</text>'
+                     f'<tspan class="arr down">↓</tspan> {_live_value(s.get("down_bps"), "tx_bps", s.get("iface"))}</text>'
                      f'<text class="sub rate-line" x="434" y="{sy + 24}"{_fit("↑ " + fmt_bps(s.get("up_bps")), 11.5, 112)}>'
-                     f'<tspan class="arr up">↑</tspan> {e(fmt_bps(s.get("up_bps")))}</text></g></a>')
+                     f'<tspan class="arr up">↑</tspan> {_live_value(s.get("up_bps"), "rx_bps", s.get("iface"))}</text></g></a>')
     if not segments:
         parts.append(f'<text class="sub" x="440" y="{mid + 5}">Waiting for the firewall agent…</text>')
     parts.append("</svg>")

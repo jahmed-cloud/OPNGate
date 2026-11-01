@@ -2,7 +2,7 @@
 
 ## Time and aggregation
 
-Rendered timestamps and historical chart axes follow the browser time-zone cookie (PORTAL_TZ, then UTC as fallback); WAF daily counts remain UTC calendar days. CSV timestamps stay UTC. Telemetry is timestamped on receipt by the services host. Hover graph points for timestamps and values. The flow diagram is a timestamped snapshot, not a historical traffic graph.
+Rendered timestamps and historical chart axes follow the browser time-zone cookie (PORTAL_TZ, then UTC as fallback); WAF daily counts remain UTC calendar days. CSV timestamps stay UTC. Telemetry is timestamped on receipt by the services host. Hover graph points for timestamps and values. The flow diagram combines two-second current WAN/network rates with timestamped device/topology snapshots refreshed every 30 seconds; it is not a historical traffic graph.
 
 Ranges are `1h`, `24h` (default), `7d` and `30d`. Unknown range values fall back to `24h`. SQLite selects the exact requested window and aggregates into epoch-aligned buckets. Python receives at most 240 rows rather than all raw samples. Each chart point is a bucket average; peak summary values come from raw sample maxima. The first and last buckets may be partial. This reduces application memory and response work, but range queries still scan the relevant SQLite samples.
 
@@ -15,6 +15,7 @@ All endpoints require the same signed-in session as the dashboard. Never expose 
 | GET endpoint | Result |
 | --- | --- |
 | `/api/live` | Small current WAN/interface snapshot with revision, report timestamp, source and stale state; no historical queries |
+| `/api/flow` | Map-only HTML fragment for expansion and 30-second device/topology refresh; no historical queries |
 | `/api/metrics?range=24h` | JSON with range_key, start/end Unix times, bucket_seconds, points and summary |
 | `/exports/metrics.csv?range=24h` | Download with UTC bucket start, width, sample count, WAN state, latency, loss, download and upload |
 
@@ -25,6 +26,8 @@ All endpoints require the same signed-in session as the dashboard. Never expose 
 Overview and Traffic poll the authenticated `/api/live` endpoint every two seconds while visible and unpaused. The firewall agent samples only interface counters on a dedicated two-second worker and pushes `/v1/live` through the existing mTLS listener. This feed replaces one current snapshot; it does not add historical rows. Device, DNS, VPN and security collection remains on the full-report interval (default 30 seconds); signed action polling remains 15 seconds.
 
 Historical Overview/Traffic fragments refresh every 60 seconds. Recursive keyed reconciliation updates text, attributes and chart paths while retaining mounted elements, rather than replacing the entire dashboard. The Traffic live graph contains up to 90 real observations from the last three minutes of the current browser session. Missing values or gaps over ten seconds break the line. It is not persisted, reconstructed history or interpolated traffic.
+
+The network map is preserved through historical refreshes. Expand/collapse requests only `/api/flow`, cancels superseded requests and ignores responses for older expansion state. Collapsed segments load counts only; expanded segments load at most eight online devices in stable MAC order. Map WAN/network labels, activity levels and Traffic bandwidth bars follow `/api/live`. Device branches are static, and trunk animations stop when paused, hidden or stale.
 
 Clients send `X-Live-Revision` with the last snapshot revision. An unchanged response returns 204 after checking the session; changing freshness also changes the revision. Each read is bounded to current snapshots and at most 64 interfaces. Requests use `X-Auto-Refresh: 1` so polling does not extend session idle expiry. Responses remain no-store. Legacy agents fall back to full-report rates and are labeled accordingly. Fast counters become stale at 20 seconds, full-report fallback at 120 seconds; report age remains visible.
 

@@ -10,6 +10,12 @@ Updated: 2026-11-01 (Asia/Calcutta).
 
 ## Current release
 
+Network-flow follow-up is also live (2026-11-01): two-second WAN/network map rates, live Traffic bandwidth bars, separate 30-second map/device fragments, count-only collapsed segments, bounded stable device ordering, cancelled superseded expansion requests and reduced/paused animation. Validation: 94 Python tests plus JavaScript syntax/DOM/series/tooltip checks passed.
+
+Portal rebuilt/restarted on Pi 4 and matching WAF shipper rebuilt/restarted on Pi 5. Ingest and firewall agent continue unchanged. Production browser verified CSS 34 / JS 20, fresh rates, WiFi collapse/expand and manual Refresh preserving expansion; no captured browser errors. Public unauthenticated `/api/flow` returns 401. A read-only map rendering diagnostic with all networks expanded measured 3.988 ms median over 20 renders (cold 148.308 ms; HTML 23,482 bytes). This excludes authentication middleware and public network latency. Portal resource sample: 1.71% CPU / 58.34 MiB, not a load-test guarantee.
+
+Flow rollback copies: `/opt/gateway/releases/flow-before.tgz` on both Pis, `gw-services-portal:flow-rollback` and `gw-edge-waf-shipper:flow-rollback`. Temporary upload archives removed after verification; rollback archives retained.
+
 All five performance changes are implemented. Local validation: 91 Python tests and the JavaScript DOM/series harness pass. Deployed to the existing stack and verified on 2026-11-01. All five requested changes are live.
 
 ## Deployment checklist

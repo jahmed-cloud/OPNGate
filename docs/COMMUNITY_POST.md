@@ -6,7 +6,7 @@ I've been building a self-hosted gateway portal for my OPNsense home lab and hav
 
 https://github.com/jahmed-cloud/WAF-OPNSense
 
-The portal brings connectivity, clients, traffic, DNS, VPNs and security alerts into one place. The dashboard includes UTC time axes and timestamp tooltips, latency/loss and bandwidth graphs, availability with visible telemetry gaps, device search, alert filters and CSV exports. Longer time ranges aggregate in SQLite to keep the graph data bounded. A separate two-second current-counter feed drives a rolling WAN graph, while historical charts refresh every minute without replacing the page. CrowdSec data refreshes in the background.
+The portal brings connectivity, clients, traffic, DNS, VPNs and security alerts into one place. The dashboard includes local-time axes and timestamp tooltips, latency/loss and bandwidth graphs, availability with visible telemetry gaps, device search, alert filters and CSV exports. Longer time ranges aggregate in SQLite to keep the graph data bounded. A separate two-second current-counter feed drives a rolling WAN graph, while historical charts refresh every minute without replacing the page. CrowdSec data refreshes in the background. The network flow map uses the same two-second network feed, refreshes device details separately, and keeps device positions stable. Expanding a network only loads its map fragment.
 
 The actual web application firewall runs separately at the edge: Caddy + Coraza + OWASP CRS, alongside CrowdSec. It starts in detection mode for tuning. The portal reports confirmed Coraza matches and interruptions, and avoids treating every application 403 as a WAF block.
 

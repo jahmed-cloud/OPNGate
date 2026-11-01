@@ -577,3 +577,7 @@ svg[data-tips] { cursor: crosshair; }
 .flowmap .arr.up { fill: var(--secondary); }
 .flowmap .node.segment .rate-line { font-size: 11.5px; fill: var(--text); font-variant-numeric: tabular-nums; }
 .stale-flow .flowmap .arr { fill: var(--muted); }
+.flowmap .flow.dev { animation: none !important; }
+.page-hidden .flowmap .flow, .page-hidden .live .pulse,
+.live-paused .flowmap .flow { animation-play-state: paused !important; }
+[data-flow-load-status]:empty { display: none; }

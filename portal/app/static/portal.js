@@ -94,8 +94,8 @@ function bind(id, handler) {
 }
 
 // Reconcile server fragments in place. Unchanged subtrees retain DOM identity, focus and SVG state.
-function patchNode(current, next) {
-  if (current.nodeType === 1 && next.nodeType === 1 && current.hasAttribute("data-client-owned") && next.hasAttribute("data-client-owned")) return current;
+function patchNode(current, next, allowOwned = false) {
+  if (!allowOwned && current.nodeType === 1 && next.nodeType === 1 && current.hasAttribute("data-client-owned") && next.hasAttribute("data-client-owned")) return current;
   if (current.isEqualNode(next)) return current;
   if (current.nodeType !== next.nodeType || current.nodeName !== next.nodeName) {
     const replacement = next.cloneNode(true); current.replaceWith(replacement); return replacement;
@@ -184,6 +184,7 @@ function startLive() {
   const chip = document.getElementById("live"), text = document.getElementById("live-text");
   let paused = false, busy = false, liveBusy = false, last = Date.now(), failed = false, liveFailed = false, snapshot = null;
   const livePoints = [];
+  let flowController = null;
   try { paused = localStorage.getItem("portal-live-paused") === "1"; } catch (_) {}
   const userBusy = () => {
     const a = document.activeElement;
@@ -201,12 +202,39 @@ function startLive() {
       const data = iface === undefined ? snapshot.wan : snapshot.interfaces?.find((i) => i.name === iface);
       setText(el, (el.dataset.livePrefix || "") + liveRate(data?.[el.dataset.liveRate]));
     });
+    const ceiling = Math.max(1, ...(snapshot.interfaces || []).flatMap(i => [i.rx_bps, i.tx_bps]).filter(v => typeof v === "number" && Number.isFinite(v)));
+    main.querySelectorAll("[data-live-bars]").forEach(svg => {
+      const iface = snapshot.interfaces?.find(i => i.name === svg.dataset.liveBars);
+      const wan = svg.dataset.barsWan === "true";
+      for (const [lane, field] of [["down", wan ? "rx_bps" : "tx_bps"], ["up", wan ? "tx_bps" : "rx_bps"]]) {
+        const bar = svg.querySelector(`rect.${lane}`), value = iface?.[field];
+        const width = typeof value === "number" && Number.isFinite(value) ? Math.min(200, Math.max(0, value) / ceiling * 200).toFixed(1) : "0";
+        if (bar && bar.getAttribute("width") !== width) bar.setAttribute("width", width);
+      }
+    });
+    const rateAge = snapshot.reported_at ? Date.now() / 1000 - snapshot.reported_at : Infinity;
+    const staleRates = snapshot.stale || rateAge >= (snapshot.source === "live" ? 20 : 120);
+    main.querySelectorAll(".flow-wrap").forEach(el => el.classList.toggle("stale-flow", staleRates || liveFailed));
+    main.querySelectorAll("[data-flow-rate]").forEach(el => {
+      const iface = snapshot.interfaces?.find(i => i.name === el.dataset.flowInterface);
+      const rate = iface?.[el.dataset.flowRate];
+      const level = staleRates || typeof rate !== "number" || rate < 2000 ? 0 : rate < 1e6 ? 1 : rate < 25e6 ? 2 : 3;
+      for (let n = 0; n <= 3; n++) el.classList.toggle(`lvl-${n}`, n === level);
+    });
+    const gatewayAge = snapshot.telemetry_reported_at ? Date.now() / 1000 - snapshot.telemetry_reported_at : Infinity;
+    const state = snapshot.gateway_stale || gatewayAge >= 120 ? "stale" : snapshot.gateway?.online === true ? "online" : snapshot.gateway?.online === false ? "offline" : "unknown";
+    main.querySelectorAll("[data-gateway-status]").forEach(el => setText(el, state));
+    main.querySelectorAll("[data-flow-gateway]").forEach(el => {
+      el.classList.toggle("ok", state === "online"); el.classList.toggle("bad", state === "offline");
+      el.classList.toggle("unknown", state !== "online" && state !== "offline");
+    });
     const age = snapshot.reported_at ? Math.max(0, Math.floor(Date.now() / 1000 - snapshot.reported_at)) : null;
     main.querySelectorAll("[data-live-status]").forEach((el) => setText(el,
       liveFailed ? "Rate update failed; showing last known values."
       : `Rates reported ${age === null ? "at an unknown time" : age + " s ago"}${snapshot.stale || age > (snapshot.source === "telemetry" ? 120 : 20) ? " · stale" : ""}${snapshot.source === "telemetry" ? " · full-report fallback (30 s)" : ""}.`));
   };
   const label = () => {
+    main.classList.toggle("live-paused", paused);
     if (chip) {
       chip.classList.toggle("paused", paused); chip.classList.toggle("error", (failed || liveFailed) && !paused);
       if (text) text.textContent = paused ? "Paused" : failed || liveFailed ? "Retrying" : "Live";
@@ -220,8 +248,8 @@ function startLive() {
     paintSnapshot();
     if (fast && !paused && !document.hidden && !userBusy()) paintLiveGraph(livePoints);
   };
-  async function request(url, json) {
-    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 10000);
+  async function request(url, json, controller = new AbortController()) {
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
       const res = await fetch(url, { signal: controller.signal, credentials: "same-origin", cache: "no-store",
         headers: { "X-Auto-Refresh": "1", Accept: json ? "application/json" : "text/html", ...(json && snapshot?.revision ? { "X-Live-Revision": snapshot.revision } : {}) } });
@@ -259,7 +287,27 @@ function startLive() {
     } catch (_) { liveFailed = true; }
     finally { liveBusy = false; label(); }
   }
-  const refresh = () => { tick(true); tickRates(true); };
+  async function tickFlow(force = false) {
+    const panel = document.getElementById("flow-panel");
+    if (!panel || (!force && paused) || document.hidden || userBusy()) return;
+    flowController?.abort();
+    const controller = new AbortController(); flowController = controller;
+    const expanded = flowOpen(); panel.setAttribute("aria-busy", "true");
+    try {
+      const html = await request("/api/flow", false, controller);
+      if (html === null || controller !== flowController || expanded !== flowOpen() || document.hidden || (!force && paused) || userBusy()) return;
+      const template = document.createElement("template"); template.innerHTML = html;
+      const fresh = template.content.querySelector("#flow-panel");
+      if (!fresh) throw new Error("Missing network map");
+      patchNode(panel, fresh, true); placeFlowControls(); watchFlow(); paintSnapshot();
+    } catch (error) {
+      if (controller === flowController) {
+        const status = panel.querySelector("[data-flow-load-status]");
+        if (status) setText(status, "Network view update failed. Use Refresh to retry.");
+      }
+    } finally { if (controller === flowController) panel.removeAttribute("aria-busy"); }
+  }
+  const refresh = () => { tick(true); tickRates(true); tickFlow(true); };
   chip?.addEventListener("click", () => {
     paused = !paused;
     try { localStorage.setItem("portal-live-paused", paused ? "1" : "0"); } catch (_) {}
@@ -268,8 +316,10 @@ function startLive() {
   document.addEventListener("visibilitychange", () => { if (!document.hidden && !paused) refresh(); });
   document.getElementById("refresh-now")?.addEventListener("click", refresh);
   document.addEventListener("portal:refresh", () => tick(true));
+  document.addEventListener("portal:flow", () => tickFlow(true));
   setInterval(() => tick(), every * 1000);
   if (fast) { setInterval(() => tickRates(), 2000); tickRates(); }
+  if (document.getElementById("flow-panel")) setInterval(() => tickFlow(), 30000);
   setInterval(label, fast ? 2000 : 5000); label();
 }
 
@@ -456,6 +506,8 @@ function watchFlow() {
   document.querySelectorAll(".flow-wrap").forEach((el) => flowObserver.observe(el));
 }
 watchFlow();
+document.addEventListener("visibilitychange", () => document.documentElement.classList.toggle("page-hidden", document.hidden));
+document.documentElement.classList.toggle("page-hidden", document.hidden);
 
 // Flow map: networks start collapsed; clicking one shows (or hides) its devices. The choice lives in the
 // flow_open cookie so live refreshes keep it, and only the clicked part of the map is rebuilt server-side.
@@ -465,7 +517,7 @@ function flowOpen() {
 }
 function setFlowOpen(value) {
   document.cookie = `flow_open=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax`;
-  if (document.getElementById("main")?.dataset.refresh) document.dispatchEvent(new Event("portal:refresh"));
+  if (document.getElementById("main")?.dataset.refresh) document.dispatchEvent(new Event("portal:flow"));
   else window.location.reload();
 }
 document.addEventListener("click", (e) => {

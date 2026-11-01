@@ -12,9 +12,17 @@ The five requested improvements are implemented as follows:
 
 The Traffic page adds a rolling three-minute live WAN graph based on real reports observed since opening the page. It keeps at most 90 points and does not connect missing values or gaps over ten seconds. Full history continues to use raw 30-second samples aggregated into at most 240 time buckets and refreshes every 60 seconds. Per-device rates, gateway latency, DNS and security details remain on the full telemetry cadence.
 
+## Network flow follow-up
+
+The Overview map stays mounted during history refreshes. WAN and inside-network labels/activity levels use the existing two-second snapshot, and Traffic bandwidth bars follow the same feed. Device/topology refreshes use a separate authenticated `/api/flow` fragment every 30 seconds. Expanding a network requests only that fragment, with cancellation and expansion-state checks to discard superseded responses. No history aggregation runs for a map request.
+
+Collapsed networks load counts only; expanded networks load at most eight online devices each, ordered by MAC so fluctuating traffic does not reorder cards. Device branches no longer animate. Network trunk animations stop when paused, hidden or stale. Existing layout, interface icons and signed device controls remain in place. No database migration or firewall rule change is required.
+
+Validation for this follow-up: 94 Python tests, JavaScript syntax and the DOM/series/tooltip harness pass. Regression coverage verifies map authorization, history isolation, collapsed count-only loading, stable order and preservation of the owned map during history reconciliation.
+
 Do not confuse speed-test dashboard lag with actual gateway/ISP latency. This change improves the display pipeline; it does not configure queue management or solve link congestion/bufferbloat. Two-second collection plus two-second polling and network transit can still introduce several seconds of delay.
 
-Before this release, a diagnostic on the actual Pi measured Threats at about 2160 ms on first rendering with synchronous CrowdSec access versus 3 ms cached. Other warm page renders were around 9–13 ms. On OPNsense, ten read-only netstat counter commands measured a 5.05 ms median and 5.26 ms maximum. These are short samples, not throughput or production-load guarantees. Post-deployment measurements belong in STATUS.md.
+Before this release, a diagnostic on the actual Pi measured Threats at about 2160 ms on first rendering with synchronous CrowdSec access versus 3 ms cached. Other warm page renders were around 9â€“13 ms. On OPNsense, ten read-only netstat counter commands measured a 5.05 ms median and 5.26 ms maximum. These are short samples, not throughput or production-load guarantees. Post-deployment measurements belong in STATUS.md.
 
 Validation commands:
 

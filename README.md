@@ -31,7 +31,7 @@ up, and refuses to replace a box's certificates with different ones. The [runboo
 - Traffic page with current and average download/upload, an area chart and live rates per network.
 - Latency, packet loss, bandwidth and availability graphs with timestamp tooltips; 1-hour, 24-hour, 7-day and 30-day windows.
 - Per-device download and upload speed, device-type icons (phone, laptop, NAS, switch, TV, console and more, guessed from hostname and maker) and status badges (allowed, paused, limited, sites blocked, pending).
-- A network flow map from the Internet through the firewall and each network down to its busiest devices. Select or hover a device on the map, or use its Manage menu on Clients, to pause it, cap its speed or block websites.
+- A network flow map from the Internet through the firewall and each network, with two-second WAN/network rates and up to eight devices per expanded network in stable MAC order. Device details refresh separately every 30 seconds; expanding the map does not query historical charts. Select or hover a device on the map, or use its Manage menu on Clients, to pause it, cap its speed or block websites.
 - Website blocking per device or per inside network (LAN, WiFi, MGMT, VPN): tick categories (ads from OPNsense's AdGuard list, trackers, social media, adult, gambling, scams, VPN bypass, piracy, plus Smart-TV tracking, phishing, crypto mining and dating lists from AdGuard's blocklist registry) and/or enter your own domains. Blocks run as OPNsense Unbound blocklist policies limited to the device's addresses or the network's subnet; your network-wide blocklist still applies. Applying takes about a minute because Unbound reloads its lists.
 - Every control change is signed with your security key and checked again by the firewall.
 - Average latency/loss, peak throughput, observed availability and telemetry coverage. Missing observations leave gaps rather than suggesting healthy service.
@@ -117,4 +117,4 @@ On Linux use `portal/.venv/bin/python` instead. OpenSSL must be available for th
 
 [Metrics reference](docs/METRICS.md) · [Community post draft](docs/COMMUNITY_POST.md) · [Historical design plan](Firewall%20Gateway%20Portal%20and%20WAF%20%E2%80%93%20Plan.md)
 
-[Performance architecture](docs/PERFORMANCE.md) � [Project status and pending work](docs/STATUS.md)
+[Performance architecture](docs/PERFORMANCE.md) · [Project status and pending work](docs/STATUS.md)

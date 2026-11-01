@@ -62,34 +62,36 @@ def _device_controls() -> dict:
 def _flow_open(request: Request) -> set:
     """Networks whose devices the flow map shows, from the flow_open cookie portal.js sets when a network is
     clicked ("*" = all). Collapsed networks only cost one row, which keeps the overview light."""
-    raw = unquote(request.cookies.get("flow_open", ""))
+    raw = unquote(request.cookies.get("flow_open", ""))[:4096]
     return {"*"} if raw == "*" else {name for name in raw.split(",") if name}
 
 
 def _flow_data(gw: dict, latest, open_segments=frozenset({"*"})) -> tuple:
-    """On an inside interface the firewall's transmit is the devices' download. The busiest online devices of
-    each open segment get their own node; the rest are counted."""
+    """On an inside interface the firewall's transmit is the devices' download. Online devices use stable MAC ordering;
+    only visible devices are loaded, with bounded per-segment lists."""
     _, interfaces = db.get_snapshot("interfaces", [])
-    wan, segments, grouped = {}, [], defaultdict(list)
-    for row in db.q("SELECT * FROM clients WHERE online=1 "
-                    "ORDER BY COALESCE(down_bps, 0) + COALESCE(up_bps, 0) DESC, hostname"):
-        c = _client(row)
-        c["label"] = c.get("hostname") or c.get("vendor") or c.get("ip") or c["mac"]
-        grouped[c["segment"]].append(c)
+    wan, segments = {}, []
+    counts = {r["segment"]: r["n"] for r in db.q("SELECT segment, COUNT(*) AS n FROM clients WHERE online=1 GROUP BY segment")}
     for interface in interfaces:
         if (interface.get("segment") or "").upper() == "WAN":
             wan = interface
             continue
-        devices = grouped[interface.get("segment")]
         name = interface.get("segment") or interface.get("name")
         is_open = "*" in open_segments or name in open_segments
+        devices = []
+        if is_open:
+            for row in db.q("SELECT * FROM clients WHERE online=1 AND segment=? ORDER BY mac LIMIT ?", interface.get("segment"), FLOW_DEVICES_PER_SEGMENT):
+                c = _client(row)
+                c["label"] = c.get("hostname") or c.get("vendor") or c.get("ip") or c["mac"]
+                devices.append(c)
+        online = counts.get(interface.get("segment"), 0)
         segments.append({
             "name": name, "iface": interface.get("name"), "open": is_open,
             "down_bps": interface.get("tx_bps"), "up_bps": interface.get("rx_bps"),
-            "online": len(devices), "devices": devices[:FLOW_DEVICES_PER_SEGMENT] if is_open else [],
-            "more": max(0, len(devices) - FLOW_DEVICES_PER_SEGMENT) if is_open else 0,
+            "online": online, "devices": devices,
+            "more": max(0, online - len(devices)) if is_open else 0,
         })
-    return {**gw, "latency_ms": latest["latency_ms"] if latest else None}, wan, segments
+    return {**gw, "latency_ms": latest["latency_ms"] if latest else gw.get("latency_ms")}, wan, segments
 
 
 @router.get("/")
@@ -110,7 +112,7 @@ def overview(request: Request, session: Session = Depends(require_user)):
         "ORDER BY start_ts DESC LIMIT 50", now, now, data["start"],
     )
     latest = db.one("SELECT * FROM samples WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT 1", data["start"], now)
-    flow_gw, flow_wan, flow_segments = _flow_data(gw, latest, _flow_open(request))
+    flow_gw, flow_wan, flow_segments = ({}, {}, []) if request.headers.get("X-Auto-Refresh") == "1" else _flow_data(gw, latest, _flow_open(request))
     flow_gw["state"] = wan_state
     flow_gw["last_seen"] = last_seen
     flow_height = flow_layout(flow_segments)
@@ -125,6 +127,24 @@ def overview(request: Request, session: Session = Depends(require_user)):
         recent_alerts=db.q("SELECT * FROM events WHERE acked_at IS NULL ORDER BY ts DESC LIMIT 5"),
         clients_online=db.one("SELECT COUNT(*) AS n FROM clients WHERE online=1")["n"], now=now,
     )
+
+
+@router.get("/api/flow")
+def flow_fragment(request: Request, session: Session = Depends(require_user)):
+    """Map-only expansion/topology refresh: never reads historical samples."""
+    ts, gw = db.get_snapshot("gateway", {})
+    now = db.now()
+    last_seen = int(db.kv_get("agent_last_seen", "0"))
+    online = bool(last_seen and 0 <= now - last_seen < 120)
+    state = "unknown" if gw.get("online") is None else "online" if gw["online"] else "offline"
+    if last_seen and not online:
+        state = "stale"
+    flow_gw, wan, segments = _flow_data(gw, None, _flow_open(request))
+    flow_gw.update(state=state, last_seen=last_seen)
+    return render(request, "_flow.html", session=session, flow_gw=flow_gw,
+                  flow_wan=wan, flow_segments=segments, flow_height=flow_layout(segments),
+                  agent_online=online, last_seen=last_seen, refresh=30,
+                  **(_device_controls() if session.is_operator else {}))
 
 
 @router.get("/api/metrics")
