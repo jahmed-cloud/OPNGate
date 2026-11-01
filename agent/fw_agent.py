@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.4.1"
+VERSION = "1.4.0"
 log = logging.getLogger("fw-agent")
 
 DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
@@ -784,12 +784,15 @@ def _set_limit(mac, rec):
 
 
 def _clear_limit(mac):
-    result = _shaper("clear", f"portal-{mac}")
-    # Reload can leave deleted pipes in the kernel. Only remove the exact pipes the
-    # model helper just removed for this device; number ranges do not prove ownership.
-    for number in sorted(set(n for n in result.get("removed_pipes", [])
-                             if isinstance(n, int) and 10000 <= n <= 65535)):
-        run(["dnctl", "pipe", str(number), "delete"])
+    _shaper("clear", f"portal-{mac}")
+    # The shaper reload leaves deleted pipes in the kernel; drop ours (numbers 10000+) that nothing uses.
+    code, stdout, _ = run(["dnctl", "pipe", "show"])
+    used = set()
+    for limits in (_shaper("list").get("limits") or {}).values():
+        used.update(str(n) for n in limits.get("numbers", []))
+    for number in re.findall(r"^(\d{5}):", stdout, re.M):
+        if int(number) >= 10000 and number not in used:
+            run(["dnctl", "pipe", number, "delete"])
 
 
 DNSBL_PHP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dnsbl.php")

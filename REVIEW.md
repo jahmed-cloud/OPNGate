@@ -36,7 +36,3 @@ The regression suite includes live API authorization/revisions/fallback/stalenes
 ## Network flow and adjacent UI review
 
 Map rates/activity and Traffic bandwidth bars now follow the two-second feed. The map has its own authenticated, history-free fragment endpoint for 30-second device updates and expansion. History responses leave the mounted map untouched; superseded map requests are cancelled and discarded. Device lists are bounded to eight per expanded network in stable MAC order; collapsed networks load counts only. Device animation is removed, while trunk animation respects pause/hidden/stale state. Map timeout failures have local retry feedback. Validation: 94 Python tests and JavaScript syntax/DOM regression checks passed. Runtime observations and rollback locations are recorded in docs/STATUS.md.
-
-## Gaming profile coexistence review
-
-Device-cap cleanup previously deleted all kernel pipes numbered 10000+ absent from the portal-device list, which could remove a manually configured shared shaper. Agent 1.4.1 instead deletes only the pipe numbers returned by the tagged clear operation. Three regression cases cover preservation of unrelated pipes, a missing ownership report and a failed model clear. The full Python suite now passes 97 tests. MGMT FQ-CoDel deployment scope and remaining game/load validation are documented in docs/GAMING_NETWORK.md.

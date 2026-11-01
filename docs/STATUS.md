@@ -10,10 +10,6 @@ Updated: 2026-11-01 (Asia/Calcutta).
 
 ## Current release
 
-Gaming follow-up (2026-11-01): MGMT-to-WAN FQ-CoDel is active at 285/285 Mbit/s for the confirmed 300/300 Mbps service. Both kernel schedulers verified as FQ_CODEL with rising counters; only TrafficShaper and revision metadata changed. No Riot route override was added. Short before/after probes showed no loss and approximately 7 ms PC-to-Internet average; a loaded-latency comparison and actual Mumbai-match packet-loss validation remain pending. Other segments remain unshaped. See GAMING_NETWORK.md for scope, tuning and private rollback locations.
-
-Agent 1.4.1 and matching shaper.php are deployed on OPNsense. Device-cap removal now deletes only pipe numbers explicitly removed by that device's tagged model operation, preserving manual gaming pipes. Regression validation: 97 Python tests passed; PHP helper lint and read-only model listing passed on the firewall. Agent credentials, state and operator trust preserved. Source rollback files end in `.gaming-backup`.
-
 Network-flow follow-up is also live (2026-11-01): two-second WAN/network map rates, live Traffic bandwidth bars, separate 30-second map/device fragments, count-only collapsed segments, bounded stable device ordering, cancelled superseded expansion requests and reduced/paused animation. Validation: 94 Python tests plus JavaScript syntax/DOM/series/tooltip checks passed.
 
 Portal rebuilt/restarted on Pi 4 and matching WAF shipper rebuilt/restarted on Pi 5. Ingest and firewall agent continue unchanged. Production browser verified CSS 34 / JS 20, fresh rates, WiFi collapse/expand and manual Refresh preserving expansion; no captured browser errors. Public unauthenticated `/api/flow` returns 401. A read-only map rendering diagnostic with all networks expanded measured 3.988 ms median over 20 renders (cold 148.308 ms; HTML 23,482 bytes). This excludes authentication middleware and public network latency. Portal resource sample: 1.71% CPU / 58.34 MiB, not a load-test guarantee.
