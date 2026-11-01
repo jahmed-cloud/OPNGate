@@ -172,7 +172,7 @@ def connect() -> sqlite3.Connection:
 
 # Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to old databases.
 MIGRATIONS = {"clients": (("down_bps", "REAL"), ("up_bps", "REAL"), ("paused", "INTEGER NOT NULL DEFAULT 0"),
-                          ("speed_limit", "TEXT"))}
+                          ("speed_limit", "TEXT"), ("blocked_domains", "TEXT"))}
 
 
 def init() -> None:

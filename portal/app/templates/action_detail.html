@@ -24,6 +24,6 @@
     <span class="muted small">You'll sign the undo with your security key, like any action.</span>
   </div>
   {% endif %}
-  <p>{% if a.type in ('pause_client', 'resume_client', 'limit_client', 'unlimit_client') %}<a href="/clients">← Back to clients</a> · {% endif %}<a href="/actions">All actions</a></p>
+  <p>{% if a.type in ('pause_client', 'resume_client', 'limit_client', 'unlimit_client', 'block_domains', 'unblock_domains') %}<a href="/clients">← Back to clients</a> · {% elif a.type in ('block_network', 'unblock_network') %}<a href="/traffic">← Back to networks</a> · {% endif %}<a href="/actions">All actions</a></p>
 </section>
 {% endblock %}

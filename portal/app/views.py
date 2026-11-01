@@ -13,7 +13,7 @@ from fastapi.responses import RedirectResponse, Response
 from . import actions, crowdsec, db, metrics
 from .config import settings
 from .security import Session, audit, check_csrf, require_user
-from .templating import render
+from .templating import flow_layout, render
 
 router = APIRouter()
 RANGES = metrics.RANGES
@@ -30,24 +30,55 @@ def _like(term: str) -> str:
     return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
+DEVICE_ACTIONS = ("pause_client", "resume_client", "limit_client", "unlimit_client", "block_domains", "unblock_domains")
+NETWORK_ACTIONS = ("block_network", "unblock_network")
+FLOW_DEVICES_PER_SEGMENT = 8
+
+
+def _client(row) -> dict:
+    c = dict(row)
+    c["limit"] = _json(c.get("speed_limit")) or None
+    c["domains"] = _json(c.get("blocked_domains")) or None
+    return c
+
+
+def _device_controls() -> dict:
+    """Waiting and in-force device actions, for the status badges and Manage menus (_device.html)."""
+    effects = actions.active_effects()
+    pending = {}
+    marks = ",".join("?" * len(DEVICE_ACTIONS))
+    for row in db.q(f"SELECT id, type, params FROM actions WHERE status IN ('pending_approval','approved','fetched') "
+                    f"AND type IN ({marks}) AND expires_at >= ?", *DEVICE_ACTIONS, db.now()):
+        pending.setdefault(_json(row["params"]).get("mac"), (row["id"], row["type"]))
+    by_kind = lambda kind: {key[1]: aid for aid, key in effects.items() if key[0] == kind}  # noqa: E731
+    return {
+        "pending": pending, "paused": by_kind("mac"), "limits": by_kind("limit"), "domain_blocks": by_kind("domains"),
+        "labels_short": {"pause_client": "Pause waiting", "resume_client": "Resume waiting", "limit_client": "Limit waiting",
+                         "unlimit_client": "Unlimit waiting", "block_domains": "Site block waiting",
+                         "unblock_domains": "Unblock waiting"},
+    }
+
+
 def _flow_data(gw: dict, latest) -> tuple:
-    """On an inside interface the firewall's transmit is the devices' download."""
+    """On an inside interface the firewall's transmit is the devices' download. The busiest online devices of
+    each segment get their own node; the rest are counted."""
     _, interfaces = db.get_snapshot("interfaces", [])
     wan, segments, grouped = {}, [], defaultdict(list)
-    for client in db.q(
-        "SELECT segment, COALESCE(NULLIF(hostname, ''), vendor, ip, mac) AS label FROM clients "
-        "WHERE online=1 ORDER BY last_seen DESC"
-    ):
-        grouped[client["segment"]].append(client["label"])
+    for row in db.q("SELECT * FROM clients WHERE online=1 "
+                    "ORDER BY COALESCE(down_bps, 0) + COALESCE(up_bps, 0) DESC, hostname"):
+        c = _client(row)
+        c["label"] = c.get("hostname") or c.get("vendor") or c.get("ip") or c["mac"]
+        grouped[c["segment"]].append(c)
     for interface in interfaces:
         if (interface.get("segment") or "").upper() == "WAN":
             wan = interface
             continue
-        names = grouped[interface.get("segment")]
+        devices = grouped[interface.get("segment")]
         segments.append({
             "name": interface.get("segment") or interface.get("name"), "iface": interface.get("name"),
             "down_bps": interface.get("tx_bps"), "up_bps": interface.get("rx_bps"),
-            "online": len(names), "names": names[:3],
+            "online": len(devices), "devices": devices[:FLOW_DEVICES_PER_SEGMENT],
+            "more": max(0, len(devices) - FLOW_DEVICES_PER_SEGMENT),
         })
     return {**gw, "latency_ms": latest["latency_ms"] if latest else None}, wan, segments
 
@@ -73,9 +104,11 @@ def overview(request: Request, session: Session = Depends(require_user)):
     flow_gw, flow_wan, flow_segments = _flow_data(gw, latest)
     flow_gw["state"] = wan_state
     flow_gw["last_seen"] = last_seen
+    flow_height = flow_layout(flow_segments)
     return render(
         request, "overview.html", session=session, range_key=key, ranges=list(RANGES), gw=gw, latest=latest,
-        metrics=data, flow_gw=flow_gw, flow_wan=flow_wan, flow_segments=flow_segments, refresh=15,
+        metrics=data, flow_gw=flow_gw, flow_wan=flow_wan, flow_segments=flow_segments, flow_height=flow_height,
+        refresh=15, **_device_controls(),
         wan_state=wan_state, agent_online=agent_online, last_seen=last_seen, segments=segments,
         availability=data["summary"]["availability_pct"], outages=outages,
         latency=[p["latency_ms"] for p in data["points"]], loss=[p["loss_pct"] for p in data["points"]],
@@ -123,23 +156,9 @@ def clients(request: Request, session: Session = Depends(require_user)):
         args += [_like(term)] * 4
     rows = db.q(sql + " ORDER BY online DESC, segment, hostname, ip LIMIT 501", *args)
     segments = [r["segment"] for r in db.q("SELECT DISTINCT segment FROM clients WHERE segment IS NOT NULL ORDER BY segment")]
-    effects = actions.active_effects()
-    pending = {}
-    for row in db.q("SELECT id, type, params FROM actions WHERE status IN ('pending_approval','approved','fetched') "
-                    "AND type IN ('pause_client','resume_client','limit_client','unlimit_client') AND expires_at >= ?",
-                    db.now()):
-        pending.setdefault(_json(row["params"]).get("mac"), (row["id"], row["type"]))
-    clients_out = []
-    for row in rows[:500]:
-        c = dict(row)
-        c["limit"] = _json(c.get("speed_limit")) or None
-        clients_out.append(c)
-    return render(request, "clients.html", session=session, rows=clients_out, segments=segments, segment=segment,
-                  show=show, q=term, limited=len(rows) > 500, now=db.now(), refresh=15, pending=pending,
-                  labels_short={"pause_client": "Pause waiting", "resume_client": "Resume waiting",
-                                "limit_client": "Limit waiting", "unlimit_client": "Unlimit waiting"},
-                  paused={key[1]: aid for aid, key in effects.items() if key[0] == "mac"},
-                  limits={key[1]: aid for aid, key in effects.items() if key[0] == "limit"})
+    return render(request, "clients.html", session=session, rows=[_client(r) for r in rows[:500]], segments=segments,
+                  segment=segment, show=show, q=term, limited=len(rows) > 500, now=db.now(), refresh=15,
+                  **_device_controls())
 
 
 @router.get("/traffic")
@@ -147,10 +166,27 @@ def traffic(request: Request, session: Session = Depends(require_user)):
     key, _ = _window(request)
     data = metrics.window(key)
     ts, interfaces = db.get_snapshot("interfaces", [])
+    rx = [p["rx_bps"] for p in data["points"] if isinstance(p.get("rx_bps"), (int, float))]
+    tx = [p["tx_bps"] for p in data["points"] if isinstance(p.get("tx_bps"), (int, float))]
+    stats = {"rx_now": rx[-1] if rx else None, "tx_now": tx[-1] if tx else None,
+             "rx_avg": sum(rx) / len(rx) if rx else None, "tx_avg": sum(tx) / len(tx) if tx else None}
+    # From the devices' side: on the WAN, in is download; on an inside interface, out is the devices' download.
+    ifaces = []
+    for i in interfaces:
+        wan = (i.get("segment") or "").upper() == "WAN"
+        ifaces.append({**i, "wan": wan, "down": i.get("rx_bps") if wan else i.get("tx_bps"),
+                       "up": i.get("tx_bps") if wan else i.get("rx_bps")})
+    peak_iface = max([max(i["down"] or 0, i["up"] or 0) for i in ifaces] or [0])
+    net_pending = {}
+    if session.is_operator:
+        for row in db.q("SELECT id, type, params FROM actions WHERE status IN ('pending_approval','approved','fetched') "
+                        "AND type IN (?, ?) AND expires_at >= ?", *NETWORK_ACTIONS, db.now()):
+            net_pending.setdefault(_json(row["params"]).get("segment"), (row["id"], row["type"]))
+    net_blocks = {key[1]: aid for aid, key in actions.active_effects().items() if key[0] == "network"}
     return render(
-        request, "traffic.html", session=session, range_key=key, ranges=list(RANGES), interfaces=interfaces,
-        updated=ts, metrics=data, rx=[p["rx_bps"] for p in data["points"]],
-        tx=[p["tx_bps"] for p in data["points"]], refresh=15,
+        request, "traffic.html", session=session, range_key=key, ranges=list(RANGES), interfaces=ifaces,
+        peak_iface=peak_iface, updated=ts, metrics=data, stats=stats, refresh=15,
+        net_pending=net_pending, net_blocks=net_blocks,
     )
 
 

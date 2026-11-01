@@ -135,6 +135,7 @@ function startLive() {
       const html = await res.text();
       if (userBusy()) return;
       main.innerHTML = html;
+      placeFlowControls();
       last = Date.now(); failed = false;
     } catch (_) {
       failed = true;
@@ -191,6 +192,15 @@ function bindThemeToggle() {
 
 // Row menus (Clients > Manage) live inside a scrolling table, which would clip them, so the open
 // panel is placed against the window instead. Delegated, because live refresh replaces the table.
+// Each device card on the flow map gets an invisible hit area that opens its Manage menu.
+// data-top/data-h are % of the SVG's height; set through the CSSOM because the CSP forbids inline styles.
+function placeFlowControls() {
+  document.querySelectorAll(".flow-ctrl[data-top]").forEach((el) => {
+    el.style.top = `${el.dataset.top}%`;
+    el.style.height = `${el.dataset.h}%`;
+  });
+}
+
 function bindMenus() {
   const closeAll = (except) => document.querySelectorAll("details.menu[open]").forEach((d) => { if (d !== except) d.open = false; });
   document.addEventListener("toggle", (ev) => {
@@ -200,9 +210,12 @@ function bindMenus() {
     const panel = menu.querySelector(".menu-panel");
     const box = menu.querySelector("summary").getBoundingClientRect();
     panel.style.position = "fixed";
-    panel.style.left = `${Math.max(8, box.right - panel.offsetWidth)}px`;
-    const below = box.bottom + 6;
-    panel.style.top = `${below + panel.offsetHeight > window.innerHeight - 8 ? Math.max(8, box.top - panel.offsetHeight - 6) : below}px`;
+    panel.style.left = `${Math.max(8, Math.min(box.right, window.innerWidth - 8) - panel.offsetWidth)}px`;
+    // Below the button if it fits, else above, else pinned inside the window (the panel scrolls itself).
+    const below = box.bottom + 6, above = box.top - panel.offsetHeight - 6;
+    const top = below + panel.offsetHeight <= window.innerHeight - 8 ? below
+      : above >= 8 ? above : Math.max(8, window.innerHeight - 8 - panel.offsetHeight);
+    panel.style.top = `${top}px`;
     panel.querySelector("button, input, select")?.focus({ preventScroll: true });
   }, true);
   document.addEventListener("click", (ev) => { if (!ev.target.closest("details.menu")) closeAll(); });
@@ -213,6 +226,7 @@ function bindMenus() {
 
 document.addEventListener("DOMContentLoaded", () => {
   bindMenus();
+  placeFlowControls();
   bindThemeToggle();
   syncTimeZone();
   startLive();

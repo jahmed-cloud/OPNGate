@@ -9,6 +9,7 @@ ETC=/usr/local/etc/fw-agent
 install -d -m 0755 /usr/local/opnsense/scripts/fw-agent
 install -m 0755 "$HERE/fw_agent.py" /usr/local/opnsense/scripts/fw-agent/fw_agent.py
 install -m 0644 "$HERE/shaper.php" /usr/local/opnsense/scripts/fw-agent/shaper.php
+install -m 0644 "$HERE/dnsbl.php" /usr/local/opnsense/scripts/fw-agent/dnsbl.php
 install -m 0644 "$HERE/portal_rules.php" /usr/local/opnsense/scripts/fw-agent/portal_rules.php
 install -m 0755 "$HERE/rc.d/fw_agent" /usr/local/etc/rc.d/fw_agent
 install -d -m 0700 "$ETC" /var/db/fw-agent

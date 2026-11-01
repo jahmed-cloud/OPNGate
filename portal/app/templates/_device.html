@@ -1,0 +1,117 @@
+{#- Device status badges and the Manage menu, shared by the Clients page and the overview's flow map.
+    Import with context: {% import "_device.html" as dev with context %}. Needs csrf, pending, labels_short,
+    paused, limits and domain_blocks from views._device_controls(). -#}
+{% macro icon(name) -%}
+<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+{%- if name == 'paused' %}<circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/>
+{%- elif name == 'limited' %}<path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4-5"/>
+{%- elif name == 'sites' %}<circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h8M12 3c-2.4 2.6-3.5 5.6-3.5 9s1.1 6.4 3.5 9M14.5 14.5l5 5M19.5 14.5l-5 5"/>
+{%- elif name == 'pending' %}<path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9"/>
+{%- else %}<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>{% endif -%}
+</svg>
+{%- endmacro %}
+
+{% macro badges(c) -%}
+{% set is_paused = c.paused or c.mac in paused %}
+{% set lim = c.limit %}
+{% set is_limited = lim or c.mac in limits %}
+{% set doms = c.domains %}
+{% set has_sites = doms or c.mac in domain_blocks %}
+{% set wait = pending.get(c.mac) %}
+{% if is_paused %}<span class="badge paused">{{ icon('paused') }}Paused</span>{% endif %}
+{% if is_limited %}<span class="badge limited">{{ icon('limited') }}{% if lim %}↓{{ '%g' % lim.down_mbps }} ↑{{ '%g' % lim.up_mbps }} Mbit/s{% else %}Limited{% endif %}</span>{% endif %}
+{% if has_sites %}{{ sites_badge(doms) }}{% endif %}
+{% if wait %}<a class="badge pending" href="/actions/{{ wait[0] }}">{{ icon('pending') }}{{ labels_short[wait[1]] }}</a>{% endif %}
+{% if not (is_paused or is_limited or has_sites or wait) %}<span class="badge ok">{{ icon('ok') }}Allowed</span>{% endif %}
+{%- endmacro %}
+
+{% macro hidden(kind, mac) -%}
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="type" value="{{ kind }}"><input type="hidden" name="mac" value="{{ mac }}">
+{%- endmacro %}
+
+{% macro sites_form(block, unblock, field, value, doms, has_sites) -%}
+<form method="post" action="/actions/new" class="domain-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="type" value="{{ block }}"><input type="hidden" name="{{ field }}" value="{{ value }}">
+  {% set chosen = (doms.lists if doms and doms.lists else []) %}
+  <fieldset class="cat-grid"><legend class="sr-only">Categories</legend>
+    {% for id, name in block_lists.items() %}<label class="cat"><input type="checkbox" name="lists" value="{{ id }}"{% if id in chosen %} checked{% endif %}><span>{{ name }}</span></label>{% endfor %}
+  </fieldset>
+  <label>Other sites, comma separated<textarea name="domains" rows="2" maxlength="2000" placeholder="youtube.com, tiktok.com">{{ doms.list | join(', ') if doms and doms.list }}</textarea></label>
+  <label>For<select name="minutes"><option value="60">1 hour</option><option value="240">4 hours</option><option value="1440">1 day</option><option value="0" selected>Until removed</option></select></label>
+  <button class="small tonal">{{ 'Update blocked sites' if has_sites else 'Block sites' }}</button>
+</form>
+{% if has_sites %}
+<form method="post" action="/actions/new"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="type" value="{{ unblock }}"><input type="hidden" name="{{ field }}" value="{{ value }}">
+  <button class="small text wide">Allow all sites again</button></form>
+{% endif %}
+{%- endmacro %}
+
+{% macro sites_badge(doms, compact=False) -%}
+{% set cat_names = (doms.lists if doms and doms.lists else []) | list_names %}
+{% set site_list = (doms.list if doms and doms.list else []) %}
+{% set full = (cat_names + site_list) | join(', ') %}
+{% if compact and cat_names %}{% set cat_names = [cat_names | length ~ ' list' ~ ('s' if cat_names | length != 1 else '')] %}{% endif %}
+<span class="badge sites" title="{{ full }}">{{ icon('sites') }}
+{%- if cat_names or site_list %}{{ cat_names | join(', ') }}{% if cat_names and site_list %} + {% endif %}{% if site_list %}{{ site_list | length }} site{{ 's' if site_list | length != 1 }}{% endif %}{{ '' if compact else ' blocked' }}{% else %}Sites blocked{% endif %}</span>
+{%- endmacro %}
+
+{#- A whole network: one Unbound policy for the interface's subnets. Needs net_pending and net_blocks. -#}
+{% macro net_menu(i) -%}
+{% set seg = i.segment or i.name %}
+{% set has_sites = i.blocks or seg in net_blocks %}
+{% set wait = net_pending.get(seg) %}
+{% if wait %}<a class="button-link small" href="/actions/{{ wait[0] }}">Approve…</a>
+{% else %}
+<details class="menu">
+  <summary>Block sites<span class="sr-only"> on {{ seg }}</span></summary>
+  <div class="menu-panel">
+    <p class="menu-label">Block websites on {{ seg }}</p>
+    {{ sites_form('block_network', 'unblock_network', 'segment', seg, i.blocks, has_sites) }}
+    <p class="menu-note small muted">Blocked in the firewall's DNS for every device on {{ seg }} (its whole subnet, sites include their subdomains). Your network-wide blocklist still applies. Applying takes about a minute.</p>
+  </div>
+</details>
+{% endif %}
+{%- endmacro %}
+
+{% macro menu(c) -%}
+{% set is_paused = c.paused or c.mac in paused %}
+{% set lim = c.limit %}
+{% set is_limited = lim or c.mac in limits %}
+{% set doms = c.domains %}
+{% set has_sites = doms or c.mac in domain_blocks %}
+{% set wait = pending.get(c.mac) %}
+{% if wait %}<a class="button-link small" href="/actions/{{ wait[0] }}">Approve…</a>
+{% else %}
+<details class="menu">
+  <summary>Manage<span class="sr-only"> {{ c.hostname or c.mac }}</span></summary>
+  <div class="menu-panel">
+    {% if is_paused %}
+    <form method="post" action="/actions/new">{{ hidden('resume_client', c.mac) }}
+      <button class="primary wide">Resume internet</button></form>
+    {% else %}
+    <p class="menu-label">Pause internet</p>
+    <div class="button-row">
+      {% for minutes, label in ((15, '15 min'), (60, '1 hour'), (0, 'Until resumed')) %}
+      <form method="post" action="/actions/new">{{ hidden('pause_client', c.mac) }}<input type="hidden" name="minutes" value="{{ minutes }}">
+        <button class="small {{ 'danger' if not minutes else 'tonal' }}">{{ label }}</button></form>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <p class="menu-label">Speed limit</p>
+    <form method="post" action="/actions/new" class="limit-form">{{ hidden('limit_client', c.mac) }}
+      <label>↓ Mbit/s<input name="down_mbps" type="number" min="0.1" max="1000" step="0.1" value="{{ '%g' % lim.down_mbps if lim else 10 }}" required></label>
+      <label>↑ Mbit/s<input name="up_mbps" type="number" min="0.1" max="1000" step="0.1" value="{{ '%g' % lim.up_mbps if lim else 5 }}" required></label>
+      <label>For<select name="minutes"><option value="60">1 hour</option><option value="240">4 hours</option><option value="1440">1 day</option><option value="0" selected>Until removed</option></select></label>
+      <button class="small tonal">{{ 'Change limit' if is_limited else 'Apply limit' }}</button>
+    </form>
+    {% if is_limited %}
+    <form method="post" action="/actions/new">{{ hidden('unlimit_client', c.mac) }}
+      <button class="small text wide">Remove speed limit</button></form>
+    {% endif %}
+    <p class="menu-label">Block websites</p>
+    {{ sites_form('block_domains', 'unblock_domains', 'mac', c.mac, doms, has_sites) }}
+    <p class="menu-note small muted">Blocked in the firewall's DNS for this device only (sites include their subdomains). Your network-wide blocklist still applies. Applying takes about a minute.</p>
+  </div>
+</details>
+{% endif %}
+{%- endmacro %}

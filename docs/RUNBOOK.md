@@ -158,4 +158,8 @@ Configure Coraza audit-log rotation/retention on the edge; access-log rotation i
 | Suspected compromise | Stop stacks and agent; inspect firewall state, restore trusted configuration and rotate credentials |
 | Stale graphs | Inspect agent service, ingest TLS/ports, time synchronization and services logs; do not assume zero traffic |
 
-Per-device speeds come from the firewall's pf state byte counters on inside interfaces, averaged over each 30-second report. Speed limits use OPNsense's traffic shaper (dummynet pipes tagged `[portal-<mac>]`, visible under Firewall > Shaper) and follow a device if its IP changes. See [METRICS.md](METRICS.md) for endpoint and measurement definitions and [REVIEW.md](../REVIEW.md) for verification limits.
+Per-device speeds come from the firewall's pf state byte counters on inside interfaces, averaged over each 30-second report. Speed limits use OPNsense's traffic shaper (dummynet pipes tagged `[portal-<mac>]`, visible under Firewall > Shaper) and follow a device if its IP changes.
+
+Website blocks use Unbound blocklist policies (Services > Unbound DNS > Blocklist), one per target, described `[portal-<mac>] domains` for a device or `[portal-net-<network>] domains` for a whole network. A device policy covers its current IPs and follows it when they change; a network policy covers the subnets on that network's interface (read with `ifconfig`; WAN is refused because nothing there queries Unbound). Categories are OPNsense's predefined lists plus a fixed set of AdGuard-registry URLs held by the agent; the portal only ever sends list keys. `agent/dnsbl.php list` shows the portal's policies. Applying reloads and re-downloads the lists (about 45-60 s). Enable `block_domains`, `unblock_domains`, `block_network` and `unblock_network` in `actions.allowed` in the firewall's `agent.json` to use them.
+
+See [METRICS.md](METRICS.md) for endpoint and measurement definitions and [REVIEW.md](../REVIEW.md) for verification limits.

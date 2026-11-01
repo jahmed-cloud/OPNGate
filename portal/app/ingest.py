@@ -119,19 +119,24 @@ def _merge_clients(clients: list, now: int) -> None:
             # What the firewall itself enforces right now; the Clients page badges come from here.
             limit = c.get("limit") if isinstance(c.get("limit"), dict) else None
             limit_json = json.dumps({k: _num(limit.get(k)) for k in ("down_mbps", "up_mbps", "until")}) if limit else None
+            sites = c.get("domains") if isinstance(c.get("domains"), dict) else None
+            sites_list = [str(d)[:253] for d in sites.get("list", []) if isinstance(d, str)][:50] if sites else []
+            sites_lists = [str(x)[:16] for x in sites.get("lists", []) if isinstance(x, str)][:20] if sites else []
+            sites_json = (json.dumps({"list": sites_list, "lists": sites_lists, "until": _num(sites.get("until"))})
+                          if sites_list or sites_lists else None)
             live = (_num(c.get("down_bps")) if online else None, _num(c.get("up_bps")) if online else None,
-                    1 if c.get("paused") is True else 0, limit_json)
+                    1 if c.get("paused") is True else 0, limit_json, sites_json)
             if existing:
                 conn.execute(
                     "UPDATE clients SET ip=COALESCE(?, ip), hostname=COALESCE(NULLIF(?, ''), hostname), "
                     "segment=COALESCE(?, segment), online=?, last_seen=CASE WHEN ? THEN ? ELSE last_seen END, "
-                    "down_bps=?, up_bps=?, paused=?, speed_limit=? WHERE mac=?",
+                    "down_bps=?, up_bps=?, paused=?, speed_limit=?, blocked_domains=? WHERE mac=?",
                     (c.get("ip"), c.get("hostname") or "", c.get("segment"), online, online, heard, *live, mac),
                 )
             else:
                 conn.execute(
                     "INSERT INTO clients(mac, ip, hostname, vendor, segment, online, first_seen, last_seen, "
-                    "down_bps, up_bps, paused, speed_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "down_bps, up_bps, paused, speed_limit, blocked_domains) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (mac, c.get("ip"), c.get("hostname") or "", oui.vendor(mac), c.get("segment"), online, now, heard, *live),
                 )
                 if db.kv_get("clients_baselined"):

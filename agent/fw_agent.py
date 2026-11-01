@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.1.0"
+VERSION = "1.3.0"
 log = logging.getLogger("fw-agent")
 
 DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
@@ -76,7 +76,7 @@ class State:
                 self.data = json.load(fh)
         except (OSError, ValueError):
             self.data = {}
-        for key, default in (("offsets", {}), ("seen_actions", {}), ("sign_counts", {}), ("blocks", {}), ("paused", {}), ("limits", {})):
+        for key, default in (("offsets", {}), ("seen_actions", {}), ("sign_counts", {}), ("blocks", {}), ("paused", {}), ("limits", {}), ("domains", {}), ("networks", {})):
             self.data.setdefault(key, default)
 
     def save(self):
@@ -283,6 +283,7 @@ def clients(cfg, client_rates=None, state=None):
     speeds = client_rates.sample(cfg) if client_rates else {}
     paused = (state["paused"] if state else {})
     limits = (state["limits"] if state else {})
+    domains = (state["domains"] if state else {})
     leases = _leases(cfg)
     max_age = _arp_max_age()
     seen = {}
@@ -311,6 +312,9 @@ def clients(cfg, client_rates=None, state=None):
         if mac in limits:
             rec["limit"] = {"down_mbps": limits[mac]["down_mbps"], "up_mbps": limits[mac]["up_mbps"],
                             "until": limits[mac].get("until", 0)}
+        if mac in domains:
+            rec["domains"] = {"list": domains[mac]["domains"], "lists": domains[mac].get("lists", []),
+                              "until": domains[mac].get("until", 0)}
     return list(seen.values())
 
 
@@ -497,6 +501,19 @@ class ActionFailed(Exception):
 
 
 MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
+# What Unbound's blocklist "wildcards" field accepts: a domain with at least one dot, no wildcards.
+# Category lists a device policy may use (ids from OPNsense's Unbound blocklist options).
+DNSBL_LISTS = {"ag", "ep", "hgz022", "oisd2", "hgz019", "hgz009", "hgz014", "hgz018", "hgz010", "hgz011"}
+# Extra lists OPNsense has no shortcode for: plain-domain sources of lists in AdGuard's DNS registry.
+# Only these URLs can be used; the portal sends the key, never a URL.
+URL_LISTS = {
+    "tvtrack": "https://raw.githubusercontent.com/Perflyst/PiHoleBlocklist/master/SmartTV.txt",
+    "phishing": "https://phishing.army/download/phishing_army_blocklist.txt",
+    "mining": "https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt",
+    "dating": "https://raw.githubusercontent.com/ShadowWhisperer/BlockLists/master/Lists/Dating",
+}
+DOMAIN_RE = re.compile(r"^(?=.{4,253}$)((?!-)[a-z0-9-]{1,63}(?<!-)\.)+[a-z][a-z0-9-]{0,62}$")
+SEGMENT_RE = re.compile(r"^[A-Za-z0-9 _-]{1,20}$")
 WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{43}=$")
 WG_IF_RE = re.compile(r"^wg[0-9]{1,2}$")
 FLAG_UP, FLAG_UV = 0x01, 0x04
@@ -593,6 +610,46 @@ def validate_params(kind, params, cfg):
         if not isinstance(minutes, int) or not 0 <= minutes <= 10080:
             raise ActionRejected("minutes out of range")
         return {"mac": mac, **speeds, "minutes": minutes}
+    if kind in ("block_domains", "unblock_domains"):
+        mac = str(params.get("mac", ""))
+        if not MAC_RE.match(mac):
+            raise ActionRejected("bad mac")
+        if mac in [m.lower() for m in acfg.get("protected_macs", [])]:
+            raise ActionRejected("mac is protected")
+        if kind == "unblock_domains":
+            return {"mac": mac}
+        domains, lists = params.get("domains", []), params.get("lists", [])
+        if not isinstance(domains, list) or len(domains) > 50:
+            raise ActionRejected("domains must be a list of up to 50 names")
+        if not all(isinstance(d, str) and DOMAIN_RE.match(d) for d in domains):
+            raise ActionRejected("bad domain name")
+        if not isinstance(lists, list) or not all(name in DNSBL_LISTS or name in URL_LISTS for name in lists):
+            raise ActionRejected("unknown blocklist")
+        if not domains and not lists:
+            raise ActionRejected("nothing to block")
+        minutes = params.get("minutes")
+        if not isinstance(minutes, int) or not 0 <= minutes <= 10080:
+            raise ActionRejected("minutes out of range")
+        return {"mac": mac, "domains": sorted(set(domains)), "lists": sorted(set(lists)), "minutes": minutes}
+    if kind in ("block_network", "unblock_network"):
+        segment = str(params.get("segment", ""))
+        if not SEGMENT_RE.match(segment) or segment not in cfg.get("segments", {}).values() or segment.upper() == "WAN":
+            raise ActionRejected("unknown network (the WAN has no DNS clients of its own)")
+        if kind == "unblock_network":
+            return {"segment": segment}
+        domains, lists = params.get("domains", []), params.get("lists", [])
+        if not isinstance(domains, list) or len(domains) > 50:
+            raise ActionRejected("domains must be a list of up to 50 names")
+        if not all(isinstance(d, str) and DOMAIN_RE.match(d) for d in domains):
+            raise ActionRejected("bad domain name")
+        if not isinstance(lists, list) or not all(name in DNSBL_LISTS or name in URL_LISTS for name in lists):
+            raise ActionRejected("unknown blocklist")
+        if not domains and not lists:
+            raise ActionRejected("nothing to block")
+        minutes = params.get("minutes")
+        if not isinstance(minutes, int) or not 0 <= minutes <= 10080:
+            raise ActionRejected("minutes out of range")
+        return {"segment": segment, "domains": sorted(set(domains)), "lists": sorted(set(lists)), "minutes": minutes}
     if kind == "breakglass":
         if not isinstance(params.get("enable"), bool):
             raise ActionRejected("enable must be true/false")
@@ -731,6 +788,68 @@ def _clear_limit(mac):
             run(["dnctl", "pipe", number, "delete"])
 
 
+DNSBL_PHP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dnsbl.php")
+
+
+def _dnsbl(*args):
+    """Run dnsbl.php (Unbound blocklist policies) and apply like the GUI. Applying re-downloads the
+    blocklists, which takes about a minute; the action only reports success once it is in force."""
+    code, stdout, stderr = run(["php", DNSBL_PHP, *args], cwd="/usr/local/opnsense/mvc")
+    try:
+        result = json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        result = {"ok": False, "error": (stderr or stdout).strip()[:200]}
+    if not result.get("ok"):
+        raise ActionFailed(f"dnsbl: {result.get('error')}")
+    if args[0] != "list":
+        run(["configctl", "template", "reload", "OPNsense/Unbound/*"])
+        run(["configctl", "unbound", "dnsbl"], timeout=300, check=True)
+    return result
+
+
+def _set_domains(mac, rec):
+    ips = [ip for ip in _ips_for_mac(mac) if not ip.startswith("fe80")]
+    if not ips:
+        raise ActionFailed("no current IP for that MAC (device offline?)")
+    lists = rec.get("lists", [])
+    codes = ",".join(name for name in lists if name in DNSBL_LISTS) or "-"
+    urls = ",".join(URL_LISTS[name] for name in lists if name in URL_LISTS) or "-"
+    _dnsbl("set", f"portal-{mac}", ",".join(ips), ",".join(rec["domains"]) or "-", codes, urls)
+    rec["ips"] = ips
+
+
+def _net_tag(segment):
+    return "portal-net-" + re.sub(r"[^a-z0-9]+", "-", segment.lower()).strip("-")
+
+
+def _segment_nets(cfg, segment):
+    """The subnets on a network's interface (IPv4 and global IPv6), from ifconfig."""
+    device = next((dev for dev, seg in cfg.get("segments", {}).items() if seg == segment), None)
+    if not device:
+        raise ActionFailed(f"no interface for {segment}")
+    code, stdout, _ = run(["ifconfig", device])
+    if code != 0:
+        raise ActionFailed(f"ifconfig {device} failed")
+    nets = set()
+    for addr, mask in re.findall(r"^\s*inet (\S+) netmask (0x[0-9a-f]+)", stdout, re.M):
+        nets.add(str(ipaddress.ip_network(f"{addr}/{bin(int(mask, 16)).count('1')}", strict=False)))
+    for addr, plen in re.findall(r"^\s*inet6 (\S+?)(?:%\S+)? prefixlen (\d+)", stdout, re.M):
+        if not addr.lower().startswith("fe80"):
+            nets.add(str(ipaddress.ip_network(f"{addr}/{plen}", strict=False)))
+    if not nets:
+        raise ActionFailed(f"{device} has no addresses")
+    return sorted(nets)
+
+
+def _set_network(cfg, segment, rec):
+    nets = _segment_nets(cfg, segment)
+    lists = rec.get("lists", [])
+    codes = ",".join(name for name in lists if name in DNSBL_LISTS) or "-"
+    urls = ",".join(URL_LISTS[name] for name in lists if name in URL_LISTS) or "-"
+    _dnsbl("set", _net_tag(segment), ",".join(nets), ",".join(rec["domains"]) or "-", codes, urls)
+    rec["nets"] = nets
+
+
 def execute(payload, cfg, state):
     acfg = cfg["actions"]
     kind, p = payload["type"], payload["params"]
@@ -775,6 +894,26 @@ def execute(payload, cfg, state):
         state["limits"].pop(p["mac"], None)
         _clear_limit(p["mac"])
         return f"speed limit removed from {p['mac']}"
+    if kind == "block_domains":
+        rec = {"domains": p["domains"], "lists": p["lists"], "until": now + p["minutes"] * 60 if p["minutes"] else 0}
+        _set_domains(p["mac"], rec)
+        state["domains"][p["mac"]] = rec
+        what = ", ".join(p["domains"] + [f"list {name}" for name in p["lists"]])
+        return f"blocked for {p['mac']} ({', '.join(rec['ips'])}): {what}"
+    if kind == "unblock_domains":
+        state["domains"].pop(p["mac"], None)
+        _dnsbl("clear", f"portal-{p['mac']}")
+        return f"domain blocks removed from {p['mac']}"
+    if kind == "block_network":
+        rec = {"domains": p["domains"], "lists": p["lists"], "until": now + p["minutes"] * 60 if p["minutes"] else 0}
+        _set_network(cfg, p["segment"], rec)
+        state["networks"][p["segment"]] = rec
+        what = ", ".join(p["domains"] + [f"list {name}" for name in p["lists"]])
+        return f"blocked on {p['segment']} ({', '.join(rec['nets'])}): {what}"
+    if kind == "unblock_network":
+        state["networks"].pop(p["segment"], None)
+        _dnsbl("clear", _net_tag(p["segment"]))
+        return f"network blocks removed from {p['segment']}"
     if kind == "breakglass":
         iface = acfg.get("breakglass_interface")
         if not iface:
@@ -831,6 +970,30 @@ def housekeeping(cfg, state):
                 log.info("speed limit on %s moved to %s", mac, rec["ip"])
         except ActionFailed as exc:
             log.warning("speed limit upkeep for %s: %s", mac, exc)
+    for mac, rec in list(state["domains"].items()):
+        try:
+            if rec.get("until") and rec["until"] <= now:
+                del state["domains"][mac]
+                _dnsbl("clear", f"portal-{mac}")
+                log.info("domain blocks on %s expired", mac)
+                continue
+            ips = [ip for ip in _ips_for_mac(mac) if not ip.startswith("fe80")]
+            if ips and sorted(ips) != sorted(rec.get("ips", [])):
+                _set_domains(mac, rec)
+                log.info("domain blocks on %s moved to %s", mac, ", ".join(rec["ips"]))
+        except ActionFailed as exc:
+            log.warning("domain block upkeep for %s: %s", mac, exc)
+    for segment, rec in list(state["networks"].items()):
+        try:
+            if rec.get("until") and rec["until"] <= now:
+                del state["networks"][segment]
+                _dnsbl("clear", _net_tag(segment))
+                log.info("network blocks on %s expired", segment)
+            elif _segment_nets(cfg, segment) != rec.get("nets"):
+                _set_network(cfg, segment, rec)
+                log.info("network blocks on %s moved to %s", segment, ", ".join(rec["nets"]))
+        except ActionFailed as exc:
+            log.warning("network block upkeep for %s: %s", segment, exc)
     cutoff = now - 7 * 86400
     state.data["seen_actions"] = {k: v for k, v in state["seen_actions"].items() if v > cutoff}
 
@@ -876,6 +1039,15 @@ def _report(portal, action_id, ok, message):
 
 # =============================================================== main loop
 
+def _with_blocks(interfaces, state):
+    networks = state["networks"] if state else {}
+    for i in interfaces:
+        rec = networks.get(i.get("segment"))
+        if rec:
+            i["blocks"] = {"list": rec["domains"], "lists": rec.get("lists", []), "until": rec.get("until", 0)}
+    return interfaces
+
+
 def collect(cfg, rates, client_rates=None, state=None):
     def safe(fn, *args):
         try:
@@ -890,7 +1062,7 @@ def collect(cfg, rates, client_rates=None, state=None):
         "hostname": os.uname().nodename,
         "uptime_s": safe(uptime_seconds),
         "gateway": safe(gateway_status, cfg) or {},
-        "interfaces": safe(rates.interfaces, cfg) or [],
+        "interfaces": _with_blocks(safe(rates.interfaces, cfg) or [], state),
         "clients": safe(clients, cfg, client_rates, state) or [],
         "vpn": safe(wireguard, cfg) or [],
         "dns": safe(dns_stats, cfg) or {},

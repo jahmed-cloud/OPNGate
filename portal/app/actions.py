@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from . import db, notify, wa
+from .devices import BLOCK_LISTS
 from .config import settings
 from .security import Session, audit, check_csrf, require_operator
 from .templating import render
@@ -26,6 +27,9 @@ router = APIRouter()
 MAC_RE = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
 WG_KEY_RE = re.compile(r"^[A-Za-z0-9+/]{43}=$")
 WG_IF_RE = re.compile(r"^wg[0-9]{1,2}$")
+# What Unbound's blocklist accepts: a domain with at least one dot (the agent checks the same rule).
+DOMAIN_RE = re.compile(r"^(?=.{4,253}$)((?!-)[a-z0-9-]{1,63}(?<!-)\.)+[a-z][a-z0-9-]{0,62}$")
+SEGMENT_RE = re.compile(r"^[A-Za-z0-9 _-]{1,20}$")
 
 ACTION_LABELS = {
     "block_ip": "Block an IP or CIDR",
@@ -35,6 +39,10 @@ ACTION_LABELS = {
     "resume_client": "Resume a client",
     "limit_client": "Limit a client's speed",
     "unlimit_client": "Remove a client's speed limit",
+    "block_domains": "Block websites for a client",
+    "unblock_domains": "Allow all websites for a client",
+    "block_network": "Block websites on a network",
+    "unblock_network": "Allow all websites on a network",
     "breakglass": "Enable / disable BREAKGLASS",
     "backup_config": "Run encrypted config backup",
 }
@@ -84,6 +92,43 @@ def _mbps(value, name: str) -> float:
     return mbps
 
 
+def _domains(value) -> list:
+    """Domains from free text ("https://www.youtube.com/watch, tiktok.com"): scheme, path, port, a leading
+    "*." or "www." are dropped, since a block always covers the domain and all its subdomains."""
+    items = value if isinstance(value, list) else re.split(r"[\s,;]+", str(value or ""))
+    found = set()
+    for item in items:
+        d = str(item).strip().lower()
+        if not d:
+            continue
+        d = re.sub(r"^[a-z][a-z0-9+.-]*://", "", d).split("/")[0].split("?")[0].split(":")[0].rstrip(".")
+        for prefix in ("*.", "www."):
+            if d.startswith(prefix) and "." in d[len(prefix):]:
+                d = d[len(prefix):]
+        if not DOMAIN_RE.match(d):
+            raise InvalidAction(f"not a domain name: {str(item).strip()[:60]}")
+        found.add(d)
+    if len(found) > 50:
+        raise InvalidAction("enter at most 50 domain names")
+    return sorted(found)
+
+
+def _lists(value) -> list:
+    items = value if isinstance(value, list) else [value] if value else []
+    if any(i not in BLOCK_LISTS for i in items):
+        raise InvalidAction("unknown blocklist")
+    return sorted(set(items))
+
+
+def _segment(value) -> str:
+    segment = str(value or "").strip()
+    if not SEGMENT_RE.match(segment):
+        raise InvalidAction("not a network name")
+    if segment.upper() == "WAN":
+        raise InvalidAction("the WAN has no devices asking the firewall's DNS; pick an inside network")
+    return segment
+
+
 def validate(kind: str, raw: dict) -> dict:
     """Normalise parameters. The agent re-validates with its own copy of these rules."""
     if kind == "block_ip":
@@ -105,6 +150,22 @@ def validate(kind: str, raw: dict) -> dict:
                 "minutes": _minutes(raw.get("minutes", 0), allow_zero=True)}
     if kind == "unlimit_client":
         return {"mac": _mac(raw.get("mac", ""))}
+    if kind == "block_domains":
+        domains, lists = _domains(raw.get("domains")), _lists(raw.get("lists"))
+        if not domains and not lists:
+            raise InvalidAction("pick a category or enter some domain names")
+        return {"mac": _mac(raw.get("mac", "")), "domains": domains, "lists": lists,
+                "minutes": _minutes(raw.get("minutes", 0), allow_zero=True)}
+    if kind == "unblock_domains":
+        return {"mac": _mac(raw.get("mac", ""))}
+    if kind == "block_network":
+        domains, lists = _domains(raw.get("domains")), _lists(raw.get("lists"))
+        if not domains and not lists:
+            raise InvalidAction("pick a category or enter some domain names")
+        return {"segment": _segment(raw.get("segment")), "domains": domains, "lists": lists,
+                "minutes": _minutes(raw.get("minutes", 0), allow_zero=True)}
+    if kind == "unblock_network":
+        return {"segment": _segment(raw.get("segment"))}
     if kind == "breakglass":
         return {"enable": str(raw.get("enable", "")).lower() in ("1", "true", "on", "yes")}
     if kind == "backup_config":
@@ -119,6 +180,10 @@ def reverse_of(kind: str, params: dict):
         return "resume_client", {"mac": params["mac"]}
     if kind == "limit_client":
         return "unlimit_client", {"mac": params["mac"]}
+    if kind == "block_domains":
+        return "unblock_domains", {"mac": params["mac"]}
+    if kind == "block_network":
+        return "unblock_network", {"segment": params["segment"]}
     if kind == "block_ip":
         return "unblock_ip", {"cidr": params["cidr"]}
     if kind == "breakglass":
@@ -126,9 +191,13 @@ def reverse_of(kind: str, params: dict):
     return None
 
 
+EFFECT_ACTIONS = ("pause_client", "limit_client", "block_domains", "block_network", "block_ip")
+
+
 def active_effects() -> dict:
     """Finished pause/limit/block actions still in force (not expired, not undone since), keyed by action id.
-    Keys: ("mac", mac) for pauses, ("limit", mac) for speed limits, ("cidr", cidr) for blocks."""
+    Keys: ("mac", mac) for pauses, ("limit", mac) for speed limits, ("domains", mac) for blocked sites,
+    ("network", segment) for a network's blocked sites, ("cidr", cidr) for blocks."""
     now = db.now()
     active, undone = {}, set()
     # rowid breaks ties: an undo created in the same second must still count as newer.
@@ -138,10 +207,15 @@ def active_effects() -> dict:
             undone.add(("mac", params.get("mac")))
         elif row["type"] == "unlimit_client":
             undone.add(("limit", params.get("mac")))
+        elif row["type"] == "unblock_domains":
+            undone.add(("domains", params.get("mac")))
+        elif row["type"] == "unblock_network":
+            undone.add(("network", params.get("segment")))
         elif row["type"] == "unblock_ip":
             undone.add(("cidr", params.get("cidr")))
-        elif row["type"] in ("pause_client", "limit_client", "block_ip"):
+        elif row["type"] in EFFECT_ACTIONS:
             key = {"pause_client": ("mac", params.get("mac")), "limit_client": ("limit", params.get("mac")),
+                   "block_domains": ("domains", params.get("mac")), "block_network": ("network", params.get("segment")),
                    "block_ip": ("cidr", params.get("cidr"))}[row["type"]]
             minutes = params.get("minutes") or 0
             expired = minutes and (row["finished_at"] or row["created_at"]) + minutes * 60 < now
@@ -199,7 +273,10 @@ def actions_page(request: Request, session: Session = Depends(require_operator))
 @router.post("/actions/new")
 async def new_action(request: Request, session: Session = Depends(require_operator)):
     await check_csrf(request, session)
-    form = dict(await request.form())
+    data = await request.form()
+    form = dict(data)
+    if "lists" in data:
+        form["lists"] = data.getlist("lists")  # checkboxes: one entry per ticked box
     kind = form.pop("type", "")
     form.pop("csrf", None)
     try:
@@ -222,7 +299,7 @@ def _get(action_id: str):
 def action_detail(action_id: str, request: Request, session: Session = Depends(require_operator)):
     row = _get(action_id)
     undo = reverse_of(row["type"], json.loads(row["params"])) if row["status"] == "done" else None
-    if undo and row["type"] in ("pause_client", "limit_client", "block_ip") and action_id not in active_effects():
+    if undo and row["type"] in EFFECT_ACTIONS and action_id not in active_effects():
         undo = None  # already expired or undone
     return render(request, "action_detail.html", session=session, a=row, labels=ACTION_LABELS,
                   payload=json.dumps(json.loads(row["payload"]), indent=2), undo=undo,

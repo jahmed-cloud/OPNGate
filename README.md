@@ -6,9 +6,9 @@ The **WAF runs at the edge in Caddy with Coraza and OWASP Core Rule Set**. The F
 
 ![Overview in dark mode](docs/screenshots/overview-dark.png)
 
-| Clients with live speeds | Threats | Light mode |
-| --- | --- | --- |
-| ![Clients](docs/screenshots/clients.png) | ![Threats](docs/screenshots/threats.png) | ![Overview in light mode](docs/screenshots/overview-light.png) |
+| Clients with live speeds | Traffic and per-network blocks | Threats | Light mode |
+| --- | --- | --- | --- |
+| ![Clients](docs/screenshots/clients.png) | ![Traffic](docs/screenshots/traffic.png) | ![Threats](docs/screenshots/threats.png) | ![Overview in light mode](docs/screenshots/overview-light.png) |
 
 Screenshots use invented devices and documentation-range addresses.
 
@@ -26,10 +26,14 @@ up, and refuses to replace a box's certificates with different ones. The [runboo
 
 ## Dashboard
 
-- Navigation grouped into Monitor, Network, Security, Control and Admin; clean zinc/black theme with light, dark and system modes.
+- Navigation grouped into Monitor, Network, Security, Control and Admin; clean zinc/black theme with an OPNsense-orange accent and light, dark and system modes.
 - Times shown in your browser's own time zone (PORTAL_TZ is the fallback).
+- Traffic page with current and average download/upload, an area chart and live rates per network.
 - Latency, packet loss, bandwidth and availability graphs with timestamp tooltips; 1-hour, 24-hour, 7-day and 30-day windows.
-- Per-device download and upload speed, status badges (allowed, paused, limited, pending) and a Manage menu to pause, resume or speed-limit a device. Each change is signed with your security key and checked by the firewall.
+- Per-device download and upload speed, device-type icons (phone, laptop, NAS, switch, TV, console and more, guessed from hostname and maker) and status badges (allowed, paused, limited, sites blocked, pending).
+- A network flow map from the Internet through the firewall and each network down to its busiest devices. Select or hover a device on the map, or use its Manage menu on Clients, to pause it, cap its speed or block websites.
+- Website blocking per device or per inside network (LAN, WiFi, MGMT, VPN): tick categories (ads from OPNsense's AdGuard list, trackers, social media, adult, gambling, scams, VPN bypass, piracy, plus Smart-TV tracking, phishing, crypto mining and dating lists from AdGuard's blocklist registry) and/or enter your own domains. Blocks run as OPNsense Unbound blocklist policies limited to the device's addresses or the network's subnet; your network-wide blocklist still applies. Applying takes about a minute because Unbound reloads its lists.
+- Every control change is signed with your security key and checked again by the firewall.
 - Average latency/loss, peak throughput, observed availability and telemetry coverage. Missing observations leave gaps rather than suggesting healthy service.
 - Timestamped network flow snapshot, current clients, recent alerts and outage history.
 - Device search by name, IP, MAC or maker; segment/status filters. Alerts filter by search, source and severity.
