@@ -118,3 +118,5 @@ On Linux use `portal/.venv/bin/python` instead. OpenSSL must be available for th
 [Metrics reference](docs/METRICS.md) · [Community post draft](docs/COMMUNITY_POST.md) · [Historical design plan](Firewall%20Gateway%20Portal%20and%20WAF%20%E2%80%93%20Plan.md)
 
 [Performance architecture](docs/PERFORMANCE.md) · [Project status and pending work](docs/STATUS.md)
+
+[Gaming latency and MGMT traffic shaping](docs/GAMING_NETWORK.md)

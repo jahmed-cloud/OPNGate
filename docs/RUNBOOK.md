@@ -20,6 +20,8 @@ The gates below still apply: check each one before moving on.
 
 ## Layout and prerequisites
 
+For gaming/queueing diagnostics and the MGMT-only FQ-CoDel profile, see [GAMING_NETWORK.md](GAMING_NETWORK.md). Deploy agent 1.4.1 with its matching `shaper.php` before using dashboard device-cap removal alongside manually configured shaper pipes.
+
 For the network-flow-only release, upload `portal/app` to both existing checkouts, rebuild/recreate `portal` on services first, then rebuild/recreate the matching `waf-shipper` on edge. Preserve `.env`, PKI, databases and agent configuration. No ingest or firewall-agent restart is needed for this UI-only release. Keep the previous source archive and image tag until normal-use verification passes; revert the portal image/source if authenticated map rendering or device controls fail. Check `/api/flow` authentication, expand/collapse, manual Refresh and fresh two-second map rates in a signed-in browser. Asset versions are CSS 34 / JavaScript 20.
 
 Current examples use OPNsense `10.10.0.1`, Pi 5 edge `10.10.0.21`, Pi 4 services `10.10.0.22`. Install 64-bit Linux and Docker Compose on both Pis; use an SSD for services data. Use a separate admin workstation and preferably routed VLANs. Configure DNS and time synchronization.

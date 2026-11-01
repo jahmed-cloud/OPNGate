@@ -71,10 +71,16 @@ if ($cmd === 'list') {
 }
 
 if ($cmd === 'clear') {
+    $numbers = [];
+    foreach ($shaper->pipes->pipe->iterateItems() as $p) {
+        if (strpos((string)$p->description, "[$tag]") !== false) {
+            $numbers[] = (int)(string)$p->number;
+        }
+    }
     $removed = remove_tagged($shaper, $tag);
     $shaper->serializeToConfig();
     Config::getInstance()->save();
-    out(['ok' => true, 'removed' => $removed]);
+    out(['ok' => true, 'removed' => $removed, 'removed_pipes' => $numbers]);
 }
 
 if ($cmd === 'set') {
