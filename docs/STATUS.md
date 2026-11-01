@@ -10,7 +10,9 @@ Updated: 2026-11-01 (Asia/Calcutta).
 
 ## Current release
 
-One-second live flow is deployed (2026-11-01): agent 1.5.0, device counters, corrected final PF state parsing, shared RAM-only last frame, bounded authenticated SSE fan-out, one-second JSON fallback and in-place device branch updates. Local validation: 107 Python tests, JavaScript syntax and both DOM/stream behavior harnesses pass. See LIVE_STREAM.md; older release measurements below remain historical.
+One-second live flow is deployed (2026-11-01): agent 1.5.0, device counters, corrected final PF state parsing, shared RAM-only last frame, bounded authenticated SSE fan-out, one-second JSON fallback and in-place device branch updates. Local validation: 108 Python tests, JavaScript syntax and both DOM/stream behavior harnesses pass. See LIVE_STREAM.md; older release measurements below remain historical.
+
+Final health verification caught a new settings default probing for a writable temp directory at import time, which prevented the read-only edge WAF log shipper from starting. Settings now select the live path without filesystem I/O. A regression test and an actual `docker run --read-only --network none` settings-import smoke test passed before redeploying the shipper. Caddy remained running throughout; only WAF log reporting was interrupted during that correction.
 
 Verified on the services Pi: portal and ingest both mount tmpfs; 12 successive fast frames arrived 0.991–1.015 seconds apart, covering 11 devices, with zero historical rows added during that observation. Current-frame JSON was 1,892 bytes and snapshot generation measured 1.558 ms median over 20 reads. Resource samples: portal 2.34% CPU / 59 MiB; ingest 2.86% CPU / 39.74 MiB. These are short normal-use observations, not load-test guarantees. The state-read/parser diagnostic on the firewall measured 27.13 ms median across five reads at approximately 205 states before the upgrade.
 

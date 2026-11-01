@@ -1,12 +1,13 @@
 import asyncio
 import json
+import tempfile
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from app import db, live
-from app.config import settings
+from app.config import Settings, settings
 from app.ingest import ingest_app
 from app.main import app
 from app.security import load_session
@@ -19,6 +20,14 @@ INTERFACES = [{'name':'igc0','segment':'WAN','rx_bps':1000,'tx_bps':200},
               {'name':'igc3','segment':'MGMT','rx_bps':200,'tx_bps':1000}]
 CLIENT = {'mac':'00:11:22:33:44:55','ip':'192.0.2.20','interface':'igc3','segment':'MGMT',
           'down_bps':8000,'up_bps':400}
+
+
+def test_settings_import_never_probes_temp_directory_in_read_only_shipper(monkeypatch):
+    monkeypatch.delenv('PORTAL_LIVE_DIR',raising=False)
+    monkeypatch.setattr(tempfile,'gettempdir',lambda: (_ for _ in ()).throw(FileNotFoundError('read-only root')))
+    assert Settings().live_dir.name == 'waf-portal-live'
+    monkeypatch.setenv('PORTAL_LIVE_DIR','/run/portal-live')
+    assert Settings().live_dir.as_posix() == '/run/portal-live'
 
 
 def test_fast_ingest_uses_last_value_file_without_database_writes(monkeypatch):

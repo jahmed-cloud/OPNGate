@@ -29,7 +29,7 @@ Performance changes reduce graph result size and Python memory work. They do not
 
 ## One-second flow streaming follow-up
 
-Device labels previously used 30-second inventory rates and their branches were static. Agent 1.5.0 adds dedicated one-second PF/interface counters, cached IP/MAC bindings, final-record parsing and duplicate/unknown-interface filtering. Ingest replaces a bounded RAM frame; the portal fans out SSE through one-slot queues and uses one-second JSON fallback. MAC/IP/segment matching avoids stale address attribution. Sessions retain idle expiry and are rechecked during streams. Full telemetry storage runs outside the ingest event loop. Validation: 107 Python tests and DOM/stream behavior harnesses; production evidence belongs in docs/STATUS.md.
+Device labels previously used 30-second inventory rates and their branches were static. Agent 1.5.0 adds dedicated one-second PF/interface counters, cached IP/MAC bindings, final-record parsing and duplicate/unknown-interface filtering. Ingest replaces a bounded RAM frame; the portal fans out SSE through one-slot queues and uses one-second JSON fallback. MAC/IP/segment matching avoids stale address attribution. Sessions retain idle expiry and are rechecked during streams. Full telemetry storage runs outside the ingest event loop. Validation: 108 Python tests and DOM/stream behavior harnesses; production evidence belongs in docs/STATUS.md. Settings initialization also has regression and real read-only-container coverage, preventing a live-directory default from breaking the WAF shipper that imports the shared settings module.
 
 ## Live-feed performance follow-up (original two-second release)
 

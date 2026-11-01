@@ -1,7 +1,6 @@
 """Portal settings, read once from the environment."""
 import ipaddress
 import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,13 +13,20 @@ def _networks(value: str) -> list:
     return [ipaddress.ip_network(v.strip(), strict=False) for v in value.split(",") if v.strip()]
 
 
+def _live_directory() -> Path:
+    # Settings are also imported by the read-only WAF shipper: choose a path
+    # without tempfile.gettempdir(), which probes the filesystem by writing.
+    return Path(_env("PORTAL_LIVE_DIR") or os.path.join(
+        os.environ.get("TMPDIR") or os.environ.get("TEMP") or "/tmp", "waf-portal-live"))
+
+
 @dataclass(frozen=True)
 class Settings:
     rp_id: str = field(default_factory=lambda: _env("PORTAL_RP_ID", "localhost"))
     rp_name: str = field(default_factory=lambda: _env("PORTAL_RP_NAME", "WAF-OPNsense"))
     origin: str = field(default_factory=lambda: _env("PORTAL_ORIGIN", "http://localhost:8000"))
     data_dir: Path = field(default_factory=lambda: Path(_env("PORTAL_DATA_DIR", "./data")))
-    live_dir: Path = field(default_factory=lambda: Path(_env("PORTAL_LIVE_DIR", str(Path(tempfile.gettempdir()) / "waf-portal-live"))))
+    live_dir: Path = field(default_factory=_live_directory)
     # Fernet key used to encrypt TOTP secrets at rest. Generate with `python -m app.cli gen-key`.
     secret_key_file: Path = field(default_factory=lambda: Path(_env("PORTAL_SECRET_KEY_FILE", "./data/secret.key")))
     # Only these peers may set X-Real-IP (the reverse proxy). Everyone else is taken at face value.

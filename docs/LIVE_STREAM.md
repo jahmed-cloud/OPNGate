@@ -31,6 +31,8 @@ Back up current application/Compose sources and tag previous images. Deploy the 
 
 Verify the tmpfs mount, advancing device frames, actual SSE arrival cadence, pause/resume, JSON fallback, authentication/idle expiry and history-row rate. Roll back the services source/images and agent source together if live ingestion or signed-in rendering fails. Retain the normal database and secrets; do not prune volumes. The old bounded database snapshot row may remain unused after upgrading.
 
+The WAF shipper also imports the shared settings module but has a read-only root and no `/tmp` mount. Settings must only choose paths, with no writable-directory probing during import. Before recreating that service, verify its image can import `app.config` under `docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges <shipper-image> python -c 'from app.config import settings'`.
+
 Validation:
 
 ```sh
