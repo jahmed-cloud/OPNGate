@@ -1,6 +1,7 @@
 """Portal settings, read once from the environment."""
 import ipaddress
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,6 +20,7 @@ class Settings:
     rp_name: str = field(default_factory=lambda: _env("PORTAL_RP_NAME", "WAF-OPNsense"))
     origin: str = field(default_factory=lambda: _env("PORTAL_ORIGIN", "http://localhost:8000"))
     data_dir: Path = field(default_factory=lambda: Path(_env("PORTAL_DATA_DIR", "./data")))
+    live_dir: Path = field(default_factory=lambda: Path(_env("PORTAL_LIVE_DIR", str(Path(tempfile.gettempdir()) / "waf-portal-live"))))
     # Fernet key used to encrypt TOTP secrets at rest. Generate with `python -m app.cli gen-key`.
     secret_key_file: Path = field(default_factory=lambda: Path(_env("PORTAL_SECRET_KEY_FILE", "./data/secret.key")))
     # Only these peers may set X-Real-IP (the reverse proxy). Everyone else is taken at face value.

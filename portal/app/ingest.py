@@ -3,14 +3,17 @@ from the dedicated agent CA (see deploy/pki). It is never published through Clou
 
 The firewall connects out to this; the portal never connects to the firewall.
 """
+import asyncio
+import ipaddress
 import json
 import logging
 import math
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 
-from . import db, notify, oui
+from . import db, live, notify, oui
 from .config import settings
 
 log = logging.getLogger("portal")
@@ -62,6 +65,10 @@ def add_event(source: str, severity: str, title: str, detail=None, ts=None) -> N
 @ingest_app.post("/v1/telemetry")
 async def telemetry(request: Request):
     data = await _json(request)
+    return await asyncio.to_thread(_telemetry, data)
+
+
+def _telemetry(data):
     now = db.now()
     gw = data.get("gateway") or {}
     if not isinstance(gw, dict):
@@ -93,7 +100,7 @@ async def telemetry(request: Request):
 
 @ingest_app.post("/v1/live")
 async def live_interfaces(request: Request):
-    """mTLS-only current counters; never add rows to historical samples."""
+    """mTLS-only latest counters, published to shared RAM without database writes."""
     data = await _json(request)
     interfaces = data.get("interfaces")
     if not isinstance(interfaces, list) or not 1 <= len(interfaces) <= 64:
@@ -110,7 +117,31 @@ async def live_interfaces(request: Request):
         names.add(name)
         clean.append({"name": name, "segment": segment,
                       "rx_bps": _num(interface.get("rx_bps")), "tx_bps": _num(interface.get("tx_bps"))})
-    db.put_snapshot("live_interfaces", clean)
+    clients = data.get("clients")
+    if clients is not None and (not isinstance(clients, list) or len(clients) > 2048):
+        raise HTTPException(400, "expected at most 2048 clients")
+    clean_clients, macs = ([] if clients is not None else None), set()
+    segments = {i["name"]: i["segment"] for i in clean}
+    for client in clients or []:
+        if not isinstance(client, dict):
+            raise HTTPException(400, "invalid client")
+        mac, interface, segment = client.get("mac"), client.get("interface"), client.get("segment")
+        if not isinstance(mac, str) or not re.fullmatch(r"[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}", mac):
+            raise HTTPException(400, "invalid client MAC")
+        mac = mac.lower()
+        if mac in macs or not isinstance(interface, str) or interface not in segments or segment != segments[interface] or segment.upper() == "WAN":
+            raise HTTPException(400, "duplicate client or invalid inside interface")
+        try:
+            address = str(ipaddress.ip_address(client.get("ip")))
+        except (ValueError, TypeError):
+            raise HTTPException(400, "invalid client address")
+        macs.add(mac)
+        clean_clients.append({"mac": mac, "ip": address, "segment": segment,
+                              "down_bps": _num(client.get("down_bps")), "up_bps": _num(client.get("up_bps"))})
+    try:
+        await asyncio.to_thread(live.publish, clean, clean_clients)
+    except ValueError:
+        raise HTTPException(413, "live frame too large")
     return {"ok": True}
 
 

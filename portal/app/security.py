@@ -308,7 +308,7 @@ def load_session(request: Request) -> Optional[Session]:
         db.run("DELETE FROM sessions WHERE id_hash=?", row["id_hash"])
         return None
     # Background refreshes of an open dashboard tab must not keep an unattended session alive.
-    if request.headers.get("x-auto-refresh") != "1":
+    if request.headers.get("x-auto-refresh") != "1" and request.url.path != "/api/live/stream":
         db.run("UPDATE sessions SET last_seen=? WHERE id_hash=?", now, row["id_hash"])
     return Session(row["id_hash"], row["user_id"], row["username"], row["role"], row["csrf"], row["last_mfa"])
 

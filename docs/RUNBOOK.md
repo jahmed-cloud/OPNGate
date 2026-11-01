@@ -18,6 +18,10 @@ Steps can be rerun on their own. `secrets` fetches the `.env` files from boxes t
 only when rotating the CA). `hostfw` refuses to run unless the Pi sees your SSH session coming from ADMIN_IP.
 The gates below still apply: check each one before moving on.
 
+## One-second streaming upgrade
+
+Follow [LIVE_STREAM.md](LIVE_STREAM.md): deploy the shared tmpfs volume and `PORTAL_LIVE_DIR` to both services, rebuild/recreate portal and ingest together, rebuild the matching edge shipper, and upgrade the agent while preserving local configuration/trust/state. Verify real browser SSE cadence through Cloudflare/WAF and confirm one-second device counters without one-second historical inserts. No Caddy, firewall-policy or shaping change is required. Assets: CSS 35 / JavaScript 22.
+
 ## Layout and prerequisites
 
 For the network-flow-only release, upload `portal/app` to both existing checkouts, rebuild/recreate `portal` on services first, then rebuild/recreate the matching `waf-shipper` on edge. Preserve `.env`, PKI, databases and agent configuration. No ingest or firewall-agent restart is needed for this UI-only release. Keep the previous source archive and image tag until normal-use verification passes; revert the portal image/source if authenticated map rendering or device controls fail. Check `/api/flow` authentication, expand/collapse, manual Refresh and fresh two-second map rates in a signed-in browser. Asset versions are CSS 34 / JavaScript 20.

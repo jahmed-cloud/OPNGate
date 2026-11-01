@@ -21,7 +21,7 @@
   <a class="tile tile-link {{ 'bad' if open_alerts else '' }}" href="/alerts"><span class="label">Open alerts</span><span class="value">{{ "{:,}".format(open_alerts) }}</span><span class="sub">Review events →</span></a>
   <div class="tile"><span class="label">Firewall uptime</span><span class="value compact">{{ gw.uptime_s | duration if gw.uptime_s else '—' }}</span><span class="sub">Last report {{ last_seen | ago }}</span></div>
 </div>
-<p class="small muted" data-live-status>Rate checks every 2 s · history refresh every 60 s.</p>
+<p class="small muted" data-live-status>Connecting to one-second live rates · history refresh every 60 s.</p>
 <section class="card availability-card" data-refresh-section="overview-4">
   <div class="card-head"><div><h2>Observed availability</h2><p class="muted small">{{ range_key }} window · missing telemetry is shown separately</p></div><div class="availability-number">{{ '%.2f' % availability if availability is not none else '—' }} <small>%</small></div></div>
   {{ uptime_bar(segments, metrics.start, metrics.end) }}

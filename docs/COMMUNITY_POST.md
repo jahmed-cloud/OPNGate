@@ -1,4 +1,8 @@
-# Community post draft
+# Community announcement
+
+Original announcement published as jahmed: https://forum.opnsense.org/index.php?topic=53268.0
+
+The text below reflects that original two-second release. The subsequent one-second streaming release is documented in LIVE_STREAM.md; no personal network tuning belongs in this announcement.
 
 **Title: My OPNsense home-lab gateway dashboard with a separate Coraza WAF edge**
 

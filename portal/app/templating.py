@@ -356,7 +356,7 @@ def _flow_level(bps) -> int:
     return 0 if bps < 2_000 else 1 if bps < 1_000_000 else 2 if bps < 25_000_000 else 3
 
 
-def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="", key="", interface=None, wan=False) -> str:
+def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="", key="", interface=None, wan=False, device=None) -> str:
     """Two curved lanes between nodes: download (towards the devices) and upload (back out).
     Dash animation speed shows the rate; idle links stay still. Classes only, so the CSP holds."""
     out = []
@@ -367,8 +367,10 @@ def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="", key="", interface=Non
         ident = html.escape(str(key), quote=True)
         live = (f' data-flow-interface="{html.escape(str(interface), quote=True)}" data-flow-rate="'
                 f'{"rx_bps" if (lane == "down") == wan else "tx_bps"}"') if interface else ""
+        if device:
+            live = _client_marker(device) + f' data-flow-client-rate="{lane}_bps"'
         out.append(f'<path data-refresh-section="lane-{ident}-{lane}" class="lane {lane} {extra}" d="{d}"/>')
-        out.append(f'<path data-refresh-section="flow-{ident}-{lane}" class="flow {lane} {extra} lvl-{_flow_level(bps)}"{live} d="{d}"/>')
+        out.append(f'<path data-refresh-section="flow-{ident}-{lane}" class="flow {lane} {extra} lvl-{0 if device else _flow_level(bps)}"{live} d="{d}"/>')
     return "".join(out)
 
 
@@ -411,6 +413,15 @@ def _live_value(value, field, interface=None):
     return f'<tspan data-live-rate="{field}"{attribute}>{html.escape(fmt_bps(value))}</tspan>'
 
 
+def _client_marker(device):
+    return ''.join(f' {name}="{html.escape(str(device.get(field) or ""), quote=True)}"'
+                   for name, field in (("data-live-client", "mac"), ("data-client-ip", "ip"), ("data-client-segment", "segment")))
+
+
+def _live_client_value(value, field, device):
+    return f'<tspan{_client_marker(device)} data-live-client-rate="{field}">{html.escape(fmt_bps(value))}</tspan>'
+
+
 def _short(text, n) -> str:
     text = str(text or "")
     return text if len(text) <= n else text[: n - 1] + "…"
@@ -448,7 +459,7 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
             if paused:
                 parts.append(f'<path class="lane blocked" d="M560,{sy} C595,{sy} 595,{dy} 630,{dy}"/>')
             else:
-                parts.append(_flow_pair(560, sy, 630, dy, d.get("down_bps"), d.get("up_bps"), "dev", key=d["mac"]))
+                parts.append(_flow_pair(560, sy, 630, dy, d.get("down_bps"), d.get("up_bps"), "dev", key=d["mac"], device=d))
             tags = []
             if paused:
                 tags.append(("paused", "Paused"))
@@ -466,7 +477,8 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
             name_room = 199 - (len(tag_text) * 10.5 * 0.6 + 10 if tags else 0)
             name = _short(d["label"], max(6, int(name_room / 6.8)))
             plain = "paused" if paused else f'↓ {fmt_bps(d.get("down_bps"))}   ↑ {fmt_bps(d.get("up_bps"))}'
-            speeds = "paused" if paused else _rates(d.get("down_bps"), d.get("up_bps"))
+            speeds = "paused" if paused else (f'<tspan class="arr down">↓</tspan> {_live_client_value(d.get("down_bps"), "down_bps", d)}   '
+                                               f'<tspan class="arr up">↑</tspan> {_live_client_value(d.get("up_bps"), "up_bps", d)}')
             what = devices.kind(d)
             parts.append(f'<g data-refresh-section="device-{e(d["mac"])}" class="node device {kind}"><title>{e(d["label"])} · {e(devices.LABELS[what])} · {e(d.get("ip") or "")} · {e(d["mac"])}</title>'
                          f'<rect x="630" y="{dy - 20}" width="250" height="40" rx="10"/>'

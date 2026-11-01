@@ -2,7 +2,7 @@
 
 ## Time and aggregation
 
-Rendered timestamps and historical chart axes follow the browser time-zone cookie (PORTAL_TZ, then UTC as fallback); WAF daily counts remain UTC calendar days. CSV timestamps stay UTC. Telemetry is timestamped on receipt by the services host. Hover graph points for timestamps and values. The flow diagram combines two-second current WAN/network rates with timestamped device/topology snapshots refreshed every 30 seconds; it is not a historical traffic graph.
+Rendered timestamps and historical chart axes follow the browser time-zone cookie (PORTAL_TZ, then UTC as fallback); WAF daily counts remain UTC calendar days. CSV timestamps stay UTC. Telemetry is timestamped on receipt by the services host. Hover graph points for timestamps and values. The flow diagram combines one-second WAN/network and routed-device rates with names/policy/topology snapshots refreshed every 30 seconds; it is not a historical traffic graph.
 
 Ranges are `1h`, `24h` (default), `7d` and `30d`. Unknown range values fall back to `24h`. SQLite selects the exact requested window and aggregates into epoch-aligned buckets. Python receives at most 240 rows rather than all raw samples. Each chart point is a bucket average; peak summary values come from raw sample maxima. The first and last buckets may be partial. This reduces application memory and response work, but range queries still scan the relevant SQLite samples.
 
@@ -14,7 +14,8 @@ All endpoints require the same signed-in session as the dashboard. Never expose 
 
 | GET endpoint | Result |
 | --- | --- |
-| `/api/live` | Small current WAN/interface snapshot with revision, report timestamp, source and stale state; no historical queries |
+| `/api/live` | Current WAN/interface/device frame with revision and separate freshness; one-second JSON fallback, no historical queries |
+| `/api/live/stream` | Authenticated SSE fan-out of changed current frames; bounded latest-value queues and session rechecks |
 | `/api/flow` | Map-only HTML fragment for expansion and 30-second device/topology refresh; no historical queries |
 | `/api/metrics?range=24h` | JSON with range_key, start/end Unix times, bucket_seconds, points and summary |
 | `/exports/metrics.csv?range=24h` | Download with UTC bucket start, width, sample count, WAN state, latency, loss, download and upload |
@@ -23,15 +24,13 @@ All endpoints require the same signed-in session as the dashboard. Never expose 
 
 ## Refresh and latency
 
-Overview and Traffic poll the authenticated `/api/live` endpoint every two seconds while visible and unpaused. The firewall agent samples only interface counters on a dedicated two-second worker and pushes `/v1/live` through the existing mTLS listener. This feed replaces one current snapshot; it does not add historical rows. Device, DNS, VPN and security collection remains on the full-report interval (default 30 seconds); signed action polling remains 15 seconds.
+Overview, Traffic and Clients receive authenticated server-sent events from `/api/live/stream`. Agent 1.5.0 samples interface and routed device counters every second, caching IP/MAC bindings for five seconds. Ingest replaces one bounded frame in a shared tmpfs volume instead of writing SQLite for each observation. Full inventory, DNS, VPN and security collection remains 30 seconds; action polling remains 15 seconds.
 
-Historical Overview/Traffic fragments refresh every 60 seconds. Recursive keyed reconciliation updates text, attributes and chart paths while retaining mounted elements, rather than replacing the entire dashboard. The Traffic live graph contains up to 90 real observations from the last three minutes of the current browser session. Missing values or gaps over ten seconds break the line. It is not persisted, reconstructed history or interpolated traffic.
+History refreshes every 60 seconds and map metadata every 30 seconds. Numeric device/network values and branch activity update in place, matched by MAC, IP and segment. Collapsed networks load counts only; expanded networks show up to eight devices in stable order. The Traffic live graph contains at most 180 real observations from three minutes of the current browser session. Missing values or gaps over ten seconds break the line. Device rates cover routed traffic, with sampling limitations; traffic switched entirely inside a subnet is not observable here.
 
-The network map is preserved through historical refreshes. Expand/collapse requests only `/api/flow`, cancels superseded requests and ignores responses for older expansion state. Collapsed segments load counts only; expanded segments load at most eight online devices in stable MAC order. Map WAN/network labels, activity levels and Traffic bandwidth bars follow `/api/live`. Device branches are static, and trunk animations stop when paused, hidden or stale.
+The portal shares one producer per process. Each stream has one pending-frame slot, with four streams per session and 64 per process. Sessions are revalidated every five seconds without extending idle expiry. Hidden/paused tabs close streams. Stream failure activates one-second revision-based JSON fallback and automatic reconnect. Full HTML updates still avoid interrupting active inputs/menus; live numeric updates continue without replacing controls. Manual Refresh works while paused.
 
-Clients send `X-Live-Revision` with the last snapshot revision. An unchanged response returns 204 after checking the session; changing freshness also changes the revision. Each read is bounded to current snapshots and at most 64 interfaces. Requests use `X-Auto-Refresh: 1` so polling does not extend session idle expiry. Responses remain no-store. Legacy agents fall back to full-report rates and are labeled accordingly. Fast counters become stale at 20 seconds, full-report fallback at 120 seconds; report age remains visible.
-
-Polling pauses while the tab is hidden, live updates are paused, or an input/menu/selection is active. Fetches time out after ten seconds; manual Refresh works while automatic updates are paused. Updates normally appear after a two-second sample plus a two-second browser check, with network/processing time on top. This is near-real-time monitoring, not a subsecond guarantee.
+Fast interface/device rates become stale at five seconds, full-report fallback at 120 seconds, with visible age and stopped stale animations. Fresh fast counters take precedence over slow averages. One second is the nominal sampling cadence; collection, network transit and scheduling still add latency. See [LIVE_STREAM.md](LIVE_STREAM.md) for limits, RAM storage, authentication and deployment checks.
 
 CrowdSec decisions refresh in a background worker every 30 seconds. Rendering never fetches CrowdSec synchronously. First load shows a loading state; errors retain the last known snapshot with freshness/error labels. A snapshot older than 60 seconds is marked stale. Reported ban durations count down from the cached observation.
 

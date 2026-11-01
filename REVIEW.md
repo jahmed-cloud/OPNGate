@@ -27,7 +27,11 @@ No production gateway configuration is changed by this review. Raspberry Pi ARM 
 Performance changes reduce graph result size and Python memory work. They do not reduce ISP latency, and no target-hardware speedup is claimed without a benchmark.
 
 
-## Live-feed performance follow-up
+## One-second flow streaming follow-up
+
+Device labels previously used 30-second inventory rates and their branches were static. Agent 1.5.0 adds dedicated one-second PF/interface counters, cached IP/MAC bindings, final-record parsing and duplicate/unknown-interface filtering. Ingest replaces a bounded RAM frame; the portal fans out SSE through one-slot queues and uses one-second JSON fallback. MAC/IP/segment matching avoids stale address attribution. Sessions retain idle expiry and are rechecked during streams. Full telemetry storage runs outside the ingest event loop. Validation: 107 Python tests and DOM/stream behavior harnesses; production evidence belongs in docs/STATUS.md.
+
+## Live-feed performance follow-up (original two-second release)
 
 Current rates now use a dedicated two-second interface-counter worker and mTLS `/v1/live` snapshot ingestion, separate from 30-second historical/device/security telemetry. Authenticated revision-based JSON polling avoids sample aggregation and preserves idle expiry. Overview/Traffic history refreshes every 60 seconds using mounted DOM reconciliation. The Traffic rolling graph uses bounded real browser-session observations, with missing-data gaps. CrowdSec network I/O runs only in its background worker; pages display cached state and freshness.
 

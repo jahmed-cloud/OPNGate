@@ -10,6 +10,14 @@ Updated: 2026-11-01 (Asia/Calcutta).
 
 ## Current release
 
+One-second live flow is deployed (2026-11-01): agent 1.5.0, device counters, corrected final PF state parsing, shared RAM-only last frame, bounded authenticated SSE fan-out, one-second JSON fallback and in-place device branch updates. Local validation: 107 Python tests, JavaScript syntax and both DOM/stream behavior harnesses pass. See LIVE_STREAM.md; older release measurements below remain historical.
+
+Verified on the services Pi: portal and ingest both mount tmpfs; 12 successive fast frames arrived 0.991–1.015 seconds apart, covering 11 devices, with zero historical rows added during that observation. Current-frame JSON was 1,892 bytes and snapshot generation measured 1.558 ms median over 20 reads. Resource samples: portal 2.34% CPU / 59 MiB; ingest 2.86% CPU / 39.74 MiB. These are short normal-use observations, not load-test guarantees. The state-read/parser diagnostic on the firewall measured 27.13 ms median across five reads at approximately 205 states before the upgrade.
+
+Verified through the signed-in production browser: “Live stream · 1 s,” fresh per-device values, active device branches, paused animations, manual Refresh while paused, resumed streaming and WiFi expansion/collapse without losing the existing LAN/MGMT expansion state. Clients also displayed live streaming rates in 20 rate cells. Public unauthenticated stream returned 401; login returned 200. Both portal/ingest and matching edge shipper are deployed; current assets are CSS 35 / JavaScript 22. A few Chrome message-channel errors were captured; no corresponding server application exception was observed.
+
+Streaming rollback: source archives `/opt/gateway/releases/streaming-before.tgz` on both Pis, Docker image tags ending `streaming-rollback`, and firewall agent source ending `.streaming-backup`. Temporary upload archives are removed after verification. Native firewall policy/configuration and agent credentials were preserved.
+
 Network-flow follow-up is also live (2026-11-01): two-second WAN/network map rates, live Traffic bandwidth bars, separate 30-second map/device fragments, count-only collapsed segments, bounded stable device ordering, cancelled superseded expansion requests and reduced/paused animation. Validation: 94 Python tests plus JavaScript syntax/DOM/series/tooltip checks passed.
 
 Portal rebuilt/restarted on Pi 4 and matching WAF shipper rebuilt/restarted on Pi 5. Ingest and firewall agent continue unchanged. Production browser verified CSS 34 / JS 20, fresh rates, WiFi collapse/expand and manual Refresh preserving expansion; no captured browser errors. Public unauthenticated `/api/flow` returns 401. A read-only map rendering diagnostic with all networks expanded measured 3.988 ms median over 20 renders (cold 148.308 ms; HTML 23,482 bytes). This excludes authentication middleware and public network latency. Portal resource sample: 1.71% CPU / 58.34 MiB, not a load-test guarantee.
@@ -34,4 +42,4 @@ All five performance changes are implemented. Local validation: 91 Python tests 
 
 - Observe performance during an actual user-run speed test and sustained multi-viewer use; no speed test is run automatically.
 - Audit log rotation/retention and action delivery/DHCP reassignment limitations described in SECURITY.md remain tracked.
-- End-to-end counter/poll timing is approximate; subsecond streaming is not promised.
+- Nominal one-second collection plus stream/network/scheduling delay is approximate; subsecond delivery is not promised.

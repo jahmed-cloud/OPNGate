@@ -136,6 +136,12 @@ function liveRate(value) {
   }
   return `${n.toFixed(1)} Tbit/s`;
 }
+function matchingLiveClient(client, dataset) {
+  return client && client.mac === dataset.liveClient && client.ip === dataset.clientIp && client.segment === dataset.clientSegment ? client : null;
+}
+function flowLevel(rate, stale) {
+  return stale || typeof rate !== "number" || !Number.isFinite(rate) || rate < 2000 ? 0 : rate < 1e6 ? 1 : rate < 25e6 ? 2 : 3;
+}
 // Real observations only: a bounded browser-session window; long gaps break the lines.
 function liveSeries(points, end) {
   const start = end - 180;
@@ -162,7 +168,7 @@ function liveSeries(points, end) {
 function paintLiveGraph(points) {
   const graph = document.getElementById("live-wan-chart");
   if (!graph) return;
-  const data = liveSeries(points, Math.floor(Date.now() / 1000));
+  const data = liveSeries(points, Math.max(Date.now() / 1000, points.length ? points[points.length - 1].ts : 0));
   const set = (selector, value, attr) => {
     const node = graph.querySelector(selector);
     if (attr) { if (node.getAttribute(attr) !== value) node.setAttribute(attr, value); }
@@ -180,11 +186,12 @@ function startLive() {
   const main = document.getElementById("main");
   const every = parseInt(main?.dataset.refresh || "0", 10);
   if (!main || !every) return;
-  const fast = !!main.querySelector("[data-live-rate]");
+  const fast = !!main.querySelector("[data-live-rate], [data-live-client-rate]");
   const chip = document.getElementById("live"), text = document.getElementById("live-text");
   let paused = false, busy = false, liveBusy = false, last = Date.now(), failed = false, liveFailed = false, snapshot = null;
   const livePoints = [];
   let flowController = null;
+  let stream = null, streamConnected = false, streamOpenedAt = 0, lastStreamAt = 0, streamRetryAt = 0;
   try { paused = localStorage.getItem("portal-live-paused") === "1"; } catch (_) {}
   const userBusy = () => {
     const a = document.activeElement;
@@ -202,6 +209,22 @@ function startLive() {
       const data = iface === undefined ? snapshot.wan : snapshot.interfaces?.find((i) => i.name === iface);
       setText(el, (el.dataset.livePrefix || "") + liveRate(data?.[el.dataset.liveRate]));
     });
+    const clients = new Map((snapshot.clients || []).map(client => [client.mac, client]));
+    const deviceAge = snapshot.clients_reported_at ? Date.now() / 1000 - snapshot.clients_reported_at : Infinity;
+    const staleDevices = snapshot.clients_stale || deviceAge >= 5 || liveFailed;
+    main.classList.toggle("device-rates-stale", staleDevices);
+    main.querySelectorAll("[data-live-client-rate]").forEach(el => {
+      const client = matchingLiveClient(clients.get(el.dataset.liveClient), el.dataset);
+      setText(el, liveRate(client?.[el.dataset.liveClientRate]));
+    });
+    main.querySelectorAll("[data-flow-client-rate]").forEach(el => {
+      const client = matchingLiveClient(clients.get(el.dataset.liveClient), el.dataset);
+      const level = flowLevel(client?.[el.dataset.flowClientRate], staleDevices);
+      for (let n = 0; n <= 3; n++) el.classList.toggle(`lvl-${n}`, n === level);
+    });
+    main.querySelectorAll("[data-live-device-status]").forEach(el => setText(el,
+      snapshot.clients_reported_at ? `Device rates reported ${Math.max(0, Math.floor(deviceAge))} s ago${staleDevices ? " · stale" : ""}. Firewall-observed traffic; names and policy states refresh every 30 s.`
+      : "Live device counters unavailable. Names and policy states refresh every 30 s."));
     const ceiling = Math.max(1, ...(snapshot.interfaces || []).flatMap(i => [i.rx_bps, i.tx_bps]).filter(v => typeof v === "number" && Number.isFinite(v)));
     main.querySelectorAll("[data-live-bars]").forEach(svg => {
       const iface = snapshot.interfaces?.find(i => i.name === svg.dataset.liveBars);
@@ -213,12 +236,12 @@ function startLive() {
       }
     });
     const rateAge = snapshot.reported_at ? Date.now() / 1000 - snapshot.reported_at : Infinity;
-    const staleRates = snapshot.stale || rateAge >= (snapshot.source === "live" ? 20 : 120);
+    const staleRates = snapshot.stale || rateAge >= (snapshot.source === "live" ? 5 : 120);
     main.querySelectorAll(".flow-wrap").forEach(el => el.classList.toggle("stale-flow", staleRates || liveFailed));
     main.querySelectorAll("[data-flow-rate]").forEach(el => {
       const iface = snapshot.interfaces?.find(i => i.name === el.dataset.flowInterface);
       const rate = iface?.[el.dataset.flowRate];
-      const level = staleRates || typeof rate !== "number" || rate < 2000 ? 0 : rate < 1e6 ? 1 : rate < 25e6 ? 2 : 3;
+      const level = flowLevel(rate, staleRates || liveFailed);
       for (let n = 0; n <= 3; n++) el.classList.toggle(`lvl-${n}`, n === level);
     });
     const gatewayAge = snapshot.telemetry_reported_at ? Date.now() / 1000 - snapshot.telemetry_reported_at : Infinity;
@@ -231,20 +254,20 @@ function startLive() {
     const age = snapshot.reported_at ? Math.max(0, Math.floor(Date.now() / 1000 - snapshot.reported_at)) : null;
     main.querySelectorAll("[data-live-status]").forEach((el) => setText(el,
       liveFailed ? "Rate update failed; showing last known values."
-      : `Rates reported ${age === null ? "at an unknown time" : age + " s ago"}${snapshot.stale || age > (snapshot.source === "telemetry" ? 120 : 20) ? " · stale" : ""}${snapshot.source === "telemetry" ? " · full-report fallback (30 s)" : ""}.`));
+      : `Rates reported ${age === null ? "at an unknown time" : age + " s ago"}${snapshot.stale || age >= (snapshot.source === "telemetry" ? 120 : 5) ? " · stale" : ""}${snapshot.source === "telemetry" ? " · full-report fallback (30 s)" : ""}.`));
   };
   const label = () => {
     main.classList.toggle("live-paused", paused);
     if (chip) {
       chip.classList.toggle("paused", paused); chip.classList.toggle("error", (failed || liveFailed) && !paused);
-      if (text) text.textContent = paused ? "Paused" : failed || liveFailed ? "Retrying" : "Live";
+      if (text) setText(text, paused ? "Paused" : failed || liveFailed ? "Retrying" : "Live");
       chip.setAttribute("aria-pressed", String(!paused));
       chip.title = `Click to ${paused ? "resume" : "pause"} updates.`;
     }
     const status = document.getElementById("refresh-status");
-    if (status) status.textContent = paused ? "Automatic updates paused. Use Refresh for a manual update."
+    if (status) setText(status, paused ? "Automatic updates paused. Use Refresh for a manual update."
       : failed ? "History refresh failed; displayed history may be stale."
-      : `${fast ? "Rate checks every 2 s · " : ""}History refresh every ${every} s · last refreshed ${new Date(last).toLocaleTimeString()}. Times shown in ${status.dataset.tz || "your time zone"}.`;
+      : `${fast ? streamConnected && Date.now() - lastStreamAt < 4000 ? "Live stream · 1 s · " : "Live JSON fallback · 1 s · " : ""}History/details refresh every ${every} s · last refreshed ${new Date(last).toLocaleTimeString()}. Times shown in ${status.dataset.tz || "your time zone"}.`);
     paintSnapshot();
     if (fast && !paused && !document.hidden && !userBusy()) paintLiveGraph(livePoints);
   };
@@ -272,20 +295,47 @@ function startLive() {
     finally { busy = false; label(); }
   }
   async function tickRates(force = false) {
-    if (!fast || liveBusy || (!force && paused) || document.hidden || userBusy()) return;
+    if (!fast || liveBusy || (!force && paused) || document.hidden) return;
     liveBusy = true;
     try {
       const data = await request("/api/live", true);
-      if (!data || userBusy() || document.hidden || (!force && paused)) return;
-      snapshot = data; liveFailed = false;
-      const ts = Number(data.reported_at);
-      if (ts > 0 && (!livePoints.length || ts > livePoints[livePoints.length - 1].ts)) {
-        const numeric = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
-        livePoints.push({ ts, rx: numeric(data.wan?.rx_bps), tx: numeric(data.wan?.tx_bps) });
-        while (livePoints.length > 90 || (livePoints.length && livePoints[0].ts < ts - 180)) livePoints.shift();
-      }
+      if (!data || document.hidden || (!force && paused)) return;
+      acceptSnapshot(data);
     } catch (_) { liveFailed = true; }
     finally { liveBusy = false; label(); }
+  }
+  function acceptSnapshot(data) {
+    if (!data || !Array.isArray(data.interfaces) || !data.revision) throw new Error("Invalid live snapshot");
+    if (snapshot?.reported_at > data.reported_at) return;
+    snapshot = data; liveFailed = false;
+    const ts = Number(data.reported_at);
+    if (ts > 0 && (!livePoints.length || ts > livePoints[livePoints.length - 1].ts)) {
+      const numeric = v => typeof v === "number" && Number.isFinite(v) ? v : null;
+      livePoints.push({ts, rx:numeric(data.wan?.rx_bps), tx:numeric(data.wan?.tx_bps)});
+      while (livePoints.length > 180 || (livePoints.length && livePoints[0].ts < ts - 180)) livePoints.shift();
+    }
+    label();
+  }
+  function closeStream() {
+    const previous = stream; stream = null; streamConnected = false;
+    previous?.close();
+  }
+  function openStream() {
+    if (!fast || stream || paused || document.hidden || Date.now() < streamRetryAt || typeof EventSource !== "function") return;
+    const source = new EventSource("/api/live/stream"); stream = source; streamOpenedAt = Date.now();
+    source.onopen = () => { if (source === stream) streamConnected = true; };
+    source.addEventListener("telemetry", event => {
+      if (source !== stream) return;
+      if (paused || document.hidden) { closeStream(); return; }
+      try { acceptSnapshot(JSON.parse(event.data)); lastStreamAt = Date.now(); }
+      catch (_) { liveFailed = true; closeStream(); streamRetryAt = Date.now() + 3000; }
+    });
+    source.addEventListener("auth", () => { closeStream(); window.location.reload(); });
+    source.addEventListener("reconnect", () => { closeStream(); streamRetryAt = 0; openStream(); });
+    source.onerror = () => {
+      if (source !== stream) return;
+      closeStream(); streamRetryAt = Date.now() + 3000; liveFailed = true; tickRates();
+    };
   }
   async function tickFlow(force = false) {
     const panel = document.getElementById("flow-panel");
@@ -307,20 +357,30 @@ function startLive() {
       }
     } finally { if (controller === flowController) panel.removeAttribute("aria-busy"); }
   }
-  const refresh = () => { tick(true); tickRates(true); tickFlow(true); };
+  const refresh = () => { tick(true); tickRates(true); tickFlow(true); openStream(); };
   chip?.addEventListener("click", () => {
     paused = !paused;
     try { localStorage.setItem("portal-live-paused", paused ? "1" : "0"); } catch (_) {}
+    if (paused) closeStream();
     label(); if (!paused) refresh();
   });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && !paused) refresh(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) closeStream(); else if (!paused) refresh(); });
+  window.addEventListener("pagehide", closeStream);
   document.getElementById("refresh-now")?.addEventListener("click", refresh);
   document.addEventListener("portal:refresh", () => tick(true));
   document.addEventListener("portal:flow", () => tickFlow(true));
   setInterval(() => tick(), every * 1000);
-  if (fast) { setInterval(() => tickRates(), 2000); tickRates(); }
+  if (fast) {
+    setInterval(() => {
+      if (paused || document.hidden) { closeStream(); return; }
+      if (stream && !streamConnected && Date.now() - streamOpenedAt > 10000) { closeStream(); streamRetryAt = Date.now() + 3000; }
+      openStream();
+      if (!streamConnected || Date.now() - lastStreamAt > 3000) tickRates();
+    }, 1000);
+    openStream(); tickRates();
+  }
   if (document.getElementById("flow-panel")) setInterval(() => tickFlow(), 30000);
-  setInterval(label, fast ? 2000 : 5000); label();
+  setInterval(label, fast ? 1000 : 5000); label();
 }
 
 // Tell the server the browser's time zone (a plain "tz" cookie) so pages show local times.

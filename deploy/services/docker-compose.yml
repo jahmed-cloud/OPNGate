@@ -15,6 +15,12 @@ networks:
 
 volumes:
   portal-data:
+  portal-live:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=16m,uid=10001,gid=10001,mode=0700"
   crowdsec-db:
   crowdsec-config:
 
@@ -23,6 +29,7 @@ x-portal: &portal
   env_file: .env
   volumes:
     - portal-data:/data
+    - portal-live:/run/portal-live
     - ../pki/out/services.crt:/pki/services.crt:ro
     - ../pki/out/services.key:/pki/services.key:ro
     - ../pki/out/ingest-ca.pem:/pki/ingest-ca.pem:ro
@@ -37,6 +44,7 @@ services:
     <<: *portal
     environment:
       PORTAL_RP_ID: waf.${DOMAIN}
+      PORTAL_LIVE_DIR: /run/portal-live
       PORTAL_ORIGIN: https://waf.${DOMAIN}
       PORTAL_COOKIE_DOMAIN: ${DOMAIN}
       # Docker's port publishing keeps the real source IP, so this is the Pi 5's address.
@@ -53,6 +61,7 @@ services:
     <<: *portal
     environment:
       PORTAL_RP_ID: waf.${DOMAIN}
+      PORTAL_LIVE_DIR: /run/portal-live
       PORTAL_ORIGIN: https://waf.${DOMAIN}
     command: >
       uvicorn app.ingest:ingest_app --host 0.0.0.0 --port 9444

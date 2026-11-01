@@ -1,4 +1,5 @@
 """Public (browser-facing) portal app. Sits behind Caddy, which sits behind Cloudflare."""
+import asyncio
 import hmac
 import ipaddress
 import json
@@ -16,7 +17,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import actions, auth, crowdsec, db, views, waflog
+from . import actions, auth, crowdsec, db, live, views, waflog
 from .config import settings
 from .security import LoginRequired
 
@@ -39,8 +40,17 @@ async def lifespan(app: FastAPI):
     stop = threading.Event()
     waflog.start_background(stop)
     crowdsec.start_background(stop)
-    yield
-    stop.set()
+    app.state.live_hub = live.LiveHub()
+    task = asyncio.create_task(app.state.live_hub.run())
+    try:
+        yield
+    finally:
+        stop.set()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="portal", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -66,7 +76,7 @@ async def security_headers(request: Request, call_next):
     if not settings.dev:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     if not request.url.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = "no-store, no-transform" if request.url.path == "/api/live/stream" else "no-store"
     return response
 
 
@@ -119,7 +129,7 @@ async def waf_hits(request: Request):
 
 @app.exception_handler(LoginRequired)
 async def login_required(request: Request, exc: LoginRequired):
-    if request.method != "GET" or request.headers.get("accept", "").startswith("application/json"):
+    if request.method != "GET" or request.url.path == "/api/live/stream" or request.headers.get("accept", "").startswith("application/json"):
         return JSONResponse({"error": "login required"}, status_code=401)
     target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
     return RedirectResponse(f"/login?next={quote(target, safe='')}", 303)

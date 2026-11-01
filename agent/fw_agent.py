@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 log = logging.getLogger("fw-agent")
 
 DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
@@ -183,7 +183,7 @@ class ClientRates:
     Bytes of a state that opened and closed between two polls are missed; good enough for a live view."""
 
     def __init__(self):
-        self.prev, self.at = {}, None
+        self.prev, self.at, self.valid = {}, None, False
 
     @staticmethod
     def parse(text):
@@ -216,17 +216,20 @@ class ClientRates:
             m = re.search(r"origif: (\S+)", line)
             if m:
                 block["iface"] = m.group(1)
+        if block and block.get("id"):
+            yield block["id"], block.get("iface"), block["init"], block["resp"], block["a"], block["b"]
 
-    def sample(self, cfg):
+    def sample(self, cfg, timeout=20):
         """{ip: (down_bps, up_bps)}; empty on the first call."""
-        wan = {name for name, seg in cfg.get("segments", {}).items() if seg.upper() == "WAN"}
-        code, stdout, _ = run(["pfctl", "-vvss"])
+        inside = {name for name, seg in cfg.get("segments", {}).items() if seg.upper() != "WAN"}
+        code, stdout, _ = run(["pfctl", "-vvss"], timeout=timeout)
         if code != 0:
+            self.valid = False
             return {}
         now = time.monotonic()
         current, moved = {}, {}
         for sid, iface, init, resp, a, b in self.parse(stdout):
-            if iface in wan:
+            if iface not in inside or sid in current:
                 continue
             current[sid] = (a, b)
             pa, pb = self.prev.get(sid, (0, 0))
@@ -237,6 +240,7 @@ class ClientRates:
                 totals[1] += up
         first, elapsed = self.at is None, now - (self.at or now)
         self.prev, self.at = current, now
+        self.valid = not first and elapsed > 0
         if first or elapsed <= 0:
             return {}
         return {ip: (round(d * 8 / elapsed), round(u * 8 / elapsed)) for ip, (d, u) in moved.items()}
@@ -270,8 +274,8 @@ def _leases(cfg):
     return leases
 
 
-def arp_table():
-    code, stdout, _ = run(["arp", "-an", "--libxo", "json"])
+def arp_table(timeout=20):
+    code, stdout, _ = run(["arp", "-an", "--libxo", "json"], timeout=timeout)
     if code != 0:
         return []
     try:
@@ -1077,27 +1081,62 @@ def collect(cfg, rates, client_rates=None, state=None):
     }
 
 
-def collect_live(cfg, rates):
-    """Read interface counters only; skip the initial unmeasured zero baseline."""
+class LiveClients:
+    """Fast routed-state counters; inexpensive IP/MAC bindings cached for five seconds."""
+    def __init__(self):
+        self.rates, self.neighbors, self.refresh_at = ClientRates(), [], 0
+
+    def sample(self, cfg):
+        now = time.monotonic()
+        if now >= self.refresh_at:
+            self.neighbors = arp_table(timeout=2)
+            self.refresh_at = now + 5
+        speeds = self.rates.sample(cfg, timeout=2)
+        if not self.rates.valid:
+            return None
+        clients, seen = [], set()
+        for entry in self.neighbors:
+            mac = str(entry.get("mac-address", "")).lower()
+            interface, address = entry.get("interface"), entry.get("ip-address")
+            segment = cfg.get("segments", {}).get(interface)
+            if (not segment or segment.upper() == "WAN" or entry.get("permanent") or mac in seen
+                    or not re.fullmatch(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}", mac)):
+                continue
+            try:
+                address = str(ipaddress.ip_address(address))
+            except (ValueError, TypeError):
+                continue
+            seen.add(mac)
+            down, up = speeds.get(address, (0, 0))
+            clients.append({"mac": mac, "ip": address, "interface": interface, "segment": segment,
+                            "down_bps": down, "up_bps": up})
+            if len(clients) >= 2048:
+                break
+        return clients
+
+
+def collect_live(cfg, rates, clients=None):
+    """Fast interface/device counters; no leases, DNS, IDS, policy reads or history."""
     known = set(rates.prev)
     interfaces = rates.interfaces(cfg, timeout=2)
+    devices = clients.sample(cfg) if clients else None
     if not known or not interfaces:
         return None
     for interface in interfaces:
         if interface["name"] not in known:
             interface["rx_bps"] = interface["tx_bps"] = None
-    return {"interfaces": interfaces}
+    return {"interfaces": interfaces, "clients": devices}
 
 
 def start_live_worker(cfg, stop):
     """Independent counters cannot be delayed by DNS, IDS or device collection."""
-    interval = max(2, int(cfg.get("live_interval", 2)))
+    interval = max(1, int(cfg.get("live_interval", 1)))
     def loop():
-        rates, portal = Rates(), Portal(cfg)
+        rates, clients, portal = Rates(), LiveClients(), Portal(cfg)
         while not stop.is_set():
             started = time.monotonic()
             try:
-                current = collect_live(cfg, rates)
+                current = collect_live(cfg, rates, clients)
                 if current:
                     portal.request("POST", "/v1/live", current, timeout=3)
             except (urllib.error.URLError, OSError, ValueError, TypeError):

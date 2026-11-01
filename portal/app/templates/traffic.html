@@ -16,7 +16,7 @@
       <span class="sub">avg {{ stats.tx_avg | bps }} · peak {{ s.tx_peak_bps | bps }}</span></div>
     <div class="stat"><span class="label">Data coverage</span><strong>{{ '%.1f' % s.coverage_pct }} <small>%</small></strong>
       <span class="sub">{{ "{:,}".format(s.sample_count) }} samples · {{ metrics.bucket_seconds }} s buckets</span></div>
-    <div class="stat-unit">{{ range_key }} · {{ tz_abbr }}<br><span data-live-status>Reported {{ stats.updated | ts }}{% if stats.stale %} · stale{% endif %}</span><br>Rate checks 2 s · history refresh 60 s</div>
+    <div class="stat-unit">{{ range_key }} · {{ tz_abbr }}<br><span data-live-status>Reported {{ stats.updated | ts }}{% if stats.stale %} · stale{% endif %}</span><br>Live stream 1 s · history refresh 60 s</div>
   </div>
   <div data-client-owned data-refresh-section="live-wan-session">
     <div class="card-head"><h2>Live WAN · last 3 minutes</h2><div class="legend"><span class="lane-key down"></span>download <span class="lane-key up"></span>upload</div></div>
@@ -30,7 +30,7 @@
       <text class="chart-label" x="80" y="170" data-live-start></text><text class="chart-label" x="960" y="170" text-anchor="end" data-live-end></text>
       <text class="chart-label" x="520" y="90" text-anchor="middle" data-live-empty>Collecting live samples…</text>
     </svg>
-    <p class="chart-note">Observed since this page opened · rate checks every 2 s · gaps over 10 s stay disconnected. The scale adjusts to observed rates.</p>
+    <p class="chart-note">Observed since this page opened · one-second live feed · gaps over 10 s stay disconnected. The scale adjusts to observed rates.</p>
   </div>
   <div class="card-head"><h2>Traffic history</h2><span class="chart-unit">{{ range_key }} · refreshes every 60 s</span></div>
   {{ traffic_chart(metrics.points, metrics.start, metrics.end) }}

@@ -20,13 +20,13 @@
   <thead><tr><th>Device</th><th>Address</th><th>Segment</th><th class="num">Download</th><th class="num">Upload</th><th>Status</th><th>Last active</th>{% if session.is_operator %}<th><span class="sr-only">Manage</span></th>{% endif %}</tr></thead>
   <tbody>
   {% for c in rows %}
-  <tr class="{{ 'offline' if not c.online }}">
+  <tr class="{{ 'offline' if not c.online }}" data-refresh-section="client-{{ c.mac }}">
     <td><div class="device"><span class="kind-box">{{ device_icon(c) }}<span class="dot {{ 'on' if c.online else 'off' }}" title="{{ 'online' if c.online else 'offline' }}"></span></span>
       <div><strong>{{ c.hostname or '(no name)' }}</strong><div class="small muted">{{ c.vendor or 'Unknown maker' }}</div></div></div></td>
     <td><span class="mono">{{ c.ip or '—' }}</span><div class="small muted mono">{{ c.mac }}</div></td>
     <td>{{ c.segment or '—' }}</td>
-    <td class="num speed down">{{ c.down_bps | bps if c.online else '—' }}</td>
-    <td class="num speed up">{{ c.up_bps | bps if c.online else '—' }}</td>
+    <td class="num speed down" data-live-client="{{ c.mac }}" data-client-ip="{{ c.ip or '' }}" data-client-segment="{{ c.segment or '' }}" data-live-client-rate="down_bps">{{ c.down_bps | bps if c.online else '—' }}</td>
+    <td class="num speed up" data-live-client="{{ c.mac }}" data-client-ip="{{ c.ip or '' }}" data-client-segment="{{ c.segment or '' }}" data-live-client-rate="up_bps">{{ c.up_bps | bps if c.online else '—' }}</td>
     <td class="badges">{{ dev.badges(c) }}</td>
     <td>{{ c.last_seen | ago }}</td>
     {% if session.is_operator %}<td class="manage">{{ dev.menu(c) }}</td>{% endif %}
@@ -37,5 +37,6 @@
   </tbody>
 </table>
 </section>
-<p class="muted small">Speeds are averaged over the firewall's last report (every 30 s). Paused, limited and blocked-site states come from the firewall itself.</p>
+<p class="muted small" data-live-status>Connecting to one-second live rates…</p>
+<p class="muted small" data-live-device-status>Device rates cover firewall-observed traffic. Names and policy states refresh every 30 s.</p>
 {% endblock %}

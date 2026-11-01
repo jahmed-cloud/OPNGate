@@ -5,7 +5,7 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 
-from app import crowdsec, db, metrics
+from app import crowdsec, db, live, metrics
 from app.config import settings
 from app.ingest import ingest_app
 from app.main import app
@@ -29,6 +29,7 @@ def test_live_is_authenticated_revision_based_and_does_not_query_history(clients
     now = db.now()
     before = db.one("SELECT last_seen FROM sessions ORDER BY created_at DESC LIMIT 1")[0]
     monkeypatch.setattr(db, 'now', lambda: now + 10)
+    monkeypatch.setattr(live.time, 'time', lambda: now + 10)
     payload = {'interfaces': [{'name': 'igc0', 'segment': 'WAN', 'rx_bps': 9000000, 'tx_bps': 200000}]}
     assert agent.post('/v1/live', json=payload).status_code == 200
     monkeypatch.setattr(metrics, 'window', lambda *a: pytest.fail('current feed queried history'))
@@ -42,6 +43,7 @@ def test_live_is_authenticated_revision_based_and_does_not_query_history(clients
     headers['X-Live-Revision'] = data['revision']
     assert browser.get('/api/live', headers=headers).status_code == 204
     monkeypatch.setattr(db, 'now', lambda: now + 40)
+    monkeypatch.setattr(live.time, 'time', lambda: now + 40)
     stale = browser.get('/api/live', headers=headers)
     assert stale.status_code == 200 and stale.json()['stale']
     browser.cookies.clear()
@@ -57,6 +59,7 @@ def test_live_ingest_validation_and_legacy_fallback(clients):
     sign_in(browser)
     assert browser.get('/api/live').json()['wan'] == {'rx_bps': None, 'tx_bps': None}
     db.run("DELETE FROM snapshots")
+    (settings.live_dir / 'current.json').unlink()
     db.put_snapshot('interfaces', [{'name': 'eth0', 'segment': 'WAN', 'rx_bps': 12, 'tx_bps': 34}])
     assert browser.get('/api/live').json()['source'] == 'telemetry'
 

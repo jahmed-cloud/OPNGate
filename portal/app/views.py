@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
 from . import actions, crowdsec, db, live, metrics
 from .config import settings
@@ -158,6 +158,17 @@ def live_api(request: Request, session: Session = Depends(require_user)):
     if request.headers.get("x-live-revision") == data["revision"]:
         return Response(status_code=204)
     return data
+
+
+@router.get("/api/live/stream")
+async def live_stream(request: Request, session: Session = Depends(require_user)):
+    hub = request.app.state.live_hub
+    try:
+        queue = hub.subscribe(session.id_hash)
+    except ValueError:
+        raise HTTPException(429, "Too many live streams; use the JSON fallback")
+    return StreamingResponse(live.events(request, session, hub, queue), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
 
 
 @router.get("/exports/metrics.csv")

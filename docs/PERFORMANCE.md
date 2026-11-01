@@ -1,26 +1,26 @@
 # Performance architecture
 
-The five requested improvements are implemented as follows:
+The five requested improvements are implemented as follows. The later [one-second live-flow release](LIVE_STREAM.md) supersedes the original two-second counter pipeline:
 
 | Requirement | Implementation |
 | --- | --- |
 | Keep page/charts mounted | Recursive keyed DOM reconciliation; update text/attributes/paths in place; browser-owned live chart is preserved |
-| Frequent inexpensive collection | Dedicated agent worker reads netstat interface counters every 2 s; independent baselines and TLS client; full collection 30 s, actions 15 s |
+| Frequent inexpensive collection | Dedicated one-second interface/PF device counters; cached neighbors; independent baselines/TLS client; full collection 30 s, actions 15 s |
 | Background CrowdSec | 30 s background refresh, immediate cached reads, loading/last-success/error/stale display |
-| Separate current/history | `/v1/live` overwrites a current snapshot; `/api/live` reads bounded snapshots; no sample aggregation; history/CSV stay separate |
-| Revision-based browser updates | Authenticated 2 s polls with X-Live-Revision; 204 when unchanged; visible-tab/pause/edit guards; session idle expiry preserved |
+| Separate current/history | `/v1/live` replaces one RAM frame; SSE fan-out shares bounded current reads; no per-frame SQLite writes; history/CSV stay separate |
+| Revision-based browser updates | Authenticated SSE with one-second revision-based JSON fallback; bounded queues; hidden/pause cleanup; idle expiry and session revocation preserved |
 
-The Traffic page adds a rolling three-minute live WAN graph based on real reports observed since opening the page. It keeps at most 90 points and does not connect missing values or gaps over ten seconds. Full history continues to use raw 30-second samples aggregated into at most 240 time buckets and refreshes every 60 seconds. Per-device rates, gateway latency, DNS and security details remain on the full telemetry cadence.
+The Traffic page adds a rolling three-minute live WAN graph based on real reports observed since opening the page. It keeps at most 180 points and does not connect missing values or gaps over ten seconds. Full history continues to use raw 30-second samples aggregated into at most 240 time buckets and refreshes every 60 seconds. Device rates now use the one-second worker; gateway latency, DNS and security details remain on the full telemetry cadence.
 
 ## Network flow follow-up
 
-The Overview map stays mounted during history refreshes. WAN and inside-network labels/activity levels use the existing two-second snapshot, and Traffic bandwidth bars follow the same feed. Device/topology refreshes use a separate authenticated `/api/flow` fragment every 30 seconds. Expanding a network requests only that fragment, with cancellation and expansion-state checks to discard superseded responses. No history aggregation runs for a map request.
+The Overview map stays mounted during history refreshes. WAN, network and device labels/activity levels use the one-second stream, and Traffic bandwidth bars follow the same feed. Device/topology refreshes use a separate authenticated `/api/flow` fragment every 30 seconds. Expanding a network requests only that fragment, with cancellation and expansion-state checks to discard superseded responses. No history aggregation runs for a map request.
 
-Collapsed networks load counts only; expanded networks load at most eight online devices each, ordered by MAC so fluctuating traffic does not reorder cards. Device branches no longer animate. Network trunk animations stop when paused, hidden or stale. Existing layout, interface icons and signed device controls remain in place. No database migration or firewall rule change is required.
+Collapsed networks load counts only; expanded networks load at most eight online devices each, ordered by MAC so fluctuating traffic does not reorder cards. Device branches animate from fresh measured rates; stale/hidden/paused/off-screen and reduced-motion states suppress animation. Network trunk animations stop when paused, hidden or stale. Existing layout, interface icons and signed device controls remain in place. No database migration or firewall rule change is required.
 
 Validation for this follow-up: 94 Python tests, JavaScript syntax and the DOM/series/tooltip harness pass. Regression coverage verifies map authorization, history isolation, collapsed count-only loading, stable order and preservation of the owned map during history reconciliation.
 
-Do not confuse speed-test dashboard lag with actual gateway/ISP latency. This change improves the display pipeline; it does not configure queue management or solve link congestion/bufferbloat. Two-second collection plus two-second polling and network transit can still introduce several seconds of delay.
+Do not confuse speed-test dashboard lag with actual gateway/ISP latency. This change improves the display pipeline; it does not configure queue management or solve link congestion/bufferbloat. One-second collection plus command time, stream delivery and scheduling still add display delay; no subsecond guarantee is made.
 
 Before this release, a diagnostic on the actual Pi measured Threats at about 2160 ms on first rendering with synchronous CrowdSec access versus 3 ms cached. Other warm page renders were around 9–13 ms. On OPNsense, ten read-only netstat counter commands measured a 5.05 ms median and 5.26 ms maximum. These are short samples, not throughput or production-load guarantees. Post-deployment measurements belong in STATUS.md.
 
