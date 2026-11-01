@@ -139,6 +139,9 @@ gauc.{$DOMAIN} {
 wol.{$DOMAIN} {
 	import admin_app 10.10.0.21:8090    # Wake-on-LAN (UpSnap)
 }
+drive.{$DOMAIN} {
+	import admin_app 10.10.0.20:8080    # NAS admin console (device setup); NAS logins are a common attack target
+}
 
 # Vaultwarden: the vault API stays reachable for the mobile apps and browser extensions,
 # which can't do the portal login; /admin gets the portal login on top.

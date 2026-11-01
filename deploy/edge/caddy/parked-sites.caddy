@@ -11,9 +11,6 @@ http://myai.{$DOMAIN} {
 }
 
 # Apps with their own login, used directly by people or other apps.
-http://drive.{$DOMAIN} {
-	import app 10.10.0.20:8080
-}
 http://ai.{$DOMAIN}, http://omniroute.{$DOMAIN} {
 	import app 10.10.0.22:20128
 }
