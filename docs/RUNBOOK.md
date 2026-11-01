@@ -168,6 +168,8 @@ Per-device speeds come from the firewall's pf state byte counters on inside inte
 
 Website blocks use Unbound blocklist policies (Services > Unbound DNS > Blocklist), one per target, described `[portal-<mac>] domains` for a device or `[portal-net-<network>] domains` for a whole network. A device policy covers its current IPs and follows it when they change; a network policy covers the subnets on that network's interface (read with `ifconfig`; WAN is refused because nothing there queries Unbound). Categories are OPNsense's predefined lists plus a fixed set of AdGuard-registry URLs held by the agent; the portal only ever sends list keys. `agent/dnsbl.php list` shows the portal's policies. Applying reloads and re-downloads the lists (about 45-60 s). Enable `block_domains`, `unblock_domains`, `block_network` and `unblock_network` in `actions.allowed` in the firewall's `agent.json` to use them.
 
+After every OPNsense firmware update, open Lobby > Dashboard and check it still renders. The Telegram widgets (Network Health, Clients, Security) are not pkg-managed: an update can delete them, and a widget that fails to load blanks the whole grid. They live in the [os-telegram-alerts](https://github.com/jahmed-cloud/os-telegram-alerts) repo; restore them with its `deploy.sh`.
+
 See [METRICS.md](METRICS.md) for endpoint and measurement definitions and [REVIEW.md](../REVIEW.md) for verification limits.
 
 
