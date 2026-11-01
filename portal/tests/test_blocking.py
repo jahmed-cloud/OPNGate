@@ -107,8 +107,15 @@ def test_blocks_render_on_clients_overview_and_traffic(client, ingest):  # noqa:
     login_totp(client, name, secret)
     r = client.get("/clients")
     assert r.status_code == 200 and "Social media + 1 site blocked" in r.text and "Block websites" in r.text
+    r = client.get("/")  # networks start collapsed: a count, no device cards
+    assert r.status_code == 200 and "living-room-tv" not in r.text and "1 device online" in r.text
+    assert 'data-segment="WiFi"' in r.text and 'aria-expanded="false"' in r.text
+    client.cookies.set("flow_open", "WiFi")
     r = client.get("/")
-    assert r.status_code == 200 and "living-room-tv" in r.text
+    assert "living-room-tv" in r.text and 'aria-expanded="true"' in r.text and 'class="flow-ctrl"' in r.text
+    client.cookies.set("flow_open", "*")
+    assert "living-room-tv" in client.get("/").text
+    client.cookies.delete("flow_open")
     r = client.get("/traffic")
     assert r.status_code == 200
     assert "2 lists + 1 site" in r.text and 'name="segment" value="WiFi"' in r.text

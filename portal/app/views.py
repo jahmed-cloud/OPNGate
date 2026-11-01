@@ -5,7 +5,7 @@ import json
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -59,9 +59,16 @@ def _device_controls() -> dict:
     }
 
 
-def _flow_data(gw: dict, latest) -> tuple:
+def _flow_open(request: Request) -> set:
+    """Networks whose devices the flow map shows, from the flow_open cookie portal.js sets when a network is
+    clicked ("*" = all). Collapsed networks only cost one row, which keeps the overview light."""
+    raw = unquote(request.cookies.get("flow_open", ""))
+    return {"*"} if raw == "*" else {name for name in raw.split(",") if name}
+
+
+def _flow_data(gw: dict, latest, open_segments=frozenset({"*"})) -> tuple:
     """On an inside interface the firewall's transmit is the devices' download. The busiest online devices of
-    each segment get their own node; the rest are counted."""
+    each open segment get their own node; the rest are counted."""
     _, interfaces = db.get_snapshot("interfaces", [])
     wan, segments, grouped = {}, [], defaultdict(list)
     for row in db.q("SELECT * FROM clients WHERE online=1 "
@@ -74,11 +81,13 @@ def _flow_data(gw: dict, latest) -> tuple:
             wan = interface
             continue
         devices = grouped[interface.get("segment")]
+        name = interface.get("segment") or interface.get("name")
+        is_open = "*" in open_segments or name in open_segments
         segments.append({
-            "name": interface.get("segment") or interface.get("name"), "iface": interface.get("name"),
+            "name": name, "iface": interface.get("name"), "open": is_open,
             "down_bps": interface.get("tx_bps"), "up_bps": interface.get("rx_bps"),
-            "online": len(devices), "devices": devices[:FLOW_DEVICES_PER_SEGMENT],
-            "more": max(0, len(devices) - FLOW_DEVICES_PER_SEGMENT),
+            "online": len(devices), "devices": devices[:FLOW_DEVICES_PER_SEGMENT] if is_open else [],
+            "more": max(0, len(devices) - FLOW_DEVICES_PER_SEGMENT) if is_open else 0,
         })
     return {**gw, "latency_ms": latest["latency_ms"] if latest else None}, wan, segments
 
@@ -101,7 +110,7 @@ def overview(request: Request, session: Session = Depends(require_user)):
         "ORDER BY start_ts DESC LIMIT 50", now, now, data["start"],
     )
     latest = db.one("SELECT * FROM samples WHERE ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT 1", data["start"], now)
-    flow_gw, flow_wan, flow_segments = _flow_data(gw, latest)
+    flow_gw, flow_wan, flow_segments = _flow_data(gw, latest, _flow_open(request))
     flow_gw["state"] = wan_state
     flow_gw["last_seen"] = last_seen
     flow_height = flow_layout(flow_segments)

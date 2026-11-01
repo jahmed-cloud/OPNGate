@@ -158,6 +158,7 @@ function startLive() {
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(true); });
   document.getElementById("refresh-now")?.addEventListener("click", () => tick(true));
+  document.addEventListener("portal:refresh", () => tick(true));
   setInterval(() => tick(false), every * 1000);
   setInterval(label, 5000);
   label();
@@ -332,3 +333,31 @@ function watchFlow() {
   document.querySelectorAll(".flow-wrap").forEach((el) => flowObserver.observe(el));
 }
 watchFlow();
+
+// Flow map: networks start collapsed; clicking one shows (or hides) its devices. The choice lives in the
+// flow_open cookie so live refreshes keep it, and only the clicked part of the map is rebuilt server-side.
+function flowOpen() {
+  const m = document.cookie.match(/(?:^|; )flow_open=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+function setFlowOpen(value) {
+  document.cookie = `flow_open=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax`;
+  if (document.getElementById("main")?.dataset.refresh) document.dispatchEvent(new Event("portal:refresh"));
+  else window.location.reload();
+}
+document.addEventListener("click", (e) => {
+  const all = e.target.closest && e.target.closest("[data-flow-all]");
+  if (all) { setFlowOpen(all.dataset.flowAll); return; }
+  const seg = e.target.closest && e.target.closest(".seg-toggle[data-segment]");
+  if (!seg) return;
+  e.preventDefault();
+  const name = seg.dataset.segment;
+  const names = document.querySelectorAll(".seg-toggle[data-segment]");
+  let open = flowOpen() === "*" ? [...names].map((n) => n.dataset.segment) : flowOpen().split(",").filter(Boolean);
+  open = open.includes(name) ? open.filter((n) => n !== name) : [...open, name];
+  setFlowOpen(open.join(","));
+});
+document.addEventListener("keydown", (e) => {
+  const seg = e.target.closest && e.target.closest(".seg-toggle[data-segment]");
+  if (seg && e.key === " ") { e.preventDefault(); seg.dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+});

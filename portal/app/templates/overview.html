@@ -37,7 +37,9 @@
 </div>
 <p class="chart-note">Graphs show averages in {{ metrics.bucket_seconds }}-second buckets. Gaps indicate missing observations. Hover a point for its exact time.</p>
 <section class="card">
-  <div class="card-head"><div><h2>Network flow</h2><p class="muted small">Snapshot reported {{ last_seen | ts }}{% if not agent_online %} · stale{% endif %}{% if session.is_operator %} · Select a device to pause it, cap its speed or block sites{% endif %}</p></div><div class="legend"><span class="lane-key down"></span>download <span class="lane-key up"></span>upload <span class="lane-key blocked"></span>paused</div></div>
+  <div class="card-head"><div><h2>Network flow</h2><p class="muted small">Snapshot reported {{ last_seen | ts }}{% if not agent_online %} · stale{% endif %}{% if session.is_operator %} · Click a network to show its devices, then select a device to pause it, cap its speed or block sites{% endif %}</p></div><div class="legend"><span class="lane-key down"></span>download <span class="lane-key up"></span>upload <span class="lane-key blocked"></span>paused
+    {% set all_open = flow_segments and flow_segments | selectattr('open') | list | length == flow_segments | length %}
+    <button type="button" class="small text flow-all" data-flow-all="{{ '' if all_open else '*' }}">{{ 'Hide devices' if all_open else 'Show all devices' }}</button></div></div>
   <div class="flow-wrap {{ 'stale-flow' if not agent_online }}"><div class="flow-canvas">{{ flow_map(flow_gw, flow_wan, flow_segments, flow_height) }}
     {% if session.is_operator %}{% for s in flow_segments %}{% for d in s.devices %}<div class="flow-ctrl" data-top="{{ d.top_pct }}" data-h="{{ d.h_pct }}">{{ dev.menu(d) }}</div>{% endfor %}{% endfor %}{% endif %}
   </div></div>

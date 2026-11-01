@@ -455,11 +455,21 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
             parts.append(f'<path class="lane devices" d="M560,{sy} C595,{sy} 595,{my} 630,{my}"/>')
             parts.append(f'<a href="/clients?segment={e(s["name"])}"><g class="node more"><rect x="630" y="{my - 17}" width="250" height="34" rx="10"/>'
                          f'<text class="sub" x="646" y="{my + 4}">+{s["more"]} more on {e(s["name"])} → Clients</text></g></a>')
-        if not s.get("devices") and not s.get("more"):
+        count = s.get("online", 0)
+        if not s.get("open", True):
+            if count:
+                parts.append(f'<path class="lane devices" d="M560,{sy} C580,{sy} 580,{sy} 600,{sy}"/>')
+            parts.append(f'<text class="sub hint" x="610" y="{sy + 4}">{count} device{"s" if count != 1 else ""} online'
+                         f'{" · click the network to show them" if count else ""}</text>')
+        elif not s.get("devices") and not s.get("more"):
             parts.append(f'<text class="sub" x="636" y="{sy + 4}">No devices online</text>')
-        parts.append(f'<g class="node segment"><rect x="420" y="{sy - 28}" width="140" height="56" rx="14"/>'
-                     f'<text class="title" x="434" y="{sy - 5}">{e(_short(s["name"], 12))} <tspan class="count">{s.get("online", 0)}</tspan></text>'
-                     f'<text class="sub" x="434" y="{sy + 15}">↓ {e(fmt_bps(s.get("down_bps")))}  ↑ {e(fmt_bps(s.get("up_bps")))}</text></g>')
+        is_open = s.get("open", True)
+        parts.append(f'<a class="seg-toggle" href="#" data-segment="{e(s["name"])}" role="button" aria-expanded="{"true" if is_open else "false"}" '
+                     f'aria-label="{"Hide" if is_open else "Show"} devices on {e(s["name"])}">'
+                     f'<g class="node segment{" open" if is_open else ""}"><rect x="420" y="{sy - 28}" width="140" height="56" rx="14"/>'
+                     f'<text class="title" x="434" y="{sy - 5}">{e(_short(s["name"], 10))} <tspan class="count">{count}</tspan></text>'
+                     f'<path class="chevron" d="{"M538 " + str(sy - 10) + " l5 5 5 -5" if is_open else "M540 " + str(sy - 13) + " l5 5 -5 5"}"/>'
+                     f'<text class="sub" x="434" y="{sy + 15}">↓ {e(fmt_bps(s.get("down_bps")))}  ↑ {e(fmt_bps(s.get("up_bps")))}</text></g></a>')
     if not segments:
         parts.append(f'<text class="sub" x="440" y="{mid + 5}">Waiting for the firewall agent…</text>')
     parts.append("</svg>")

@@ -532,10 +532,8 @@ table.clients .device strong, table.clients td:nth-child(7) { white-space: nowra
 .iface-foot details.menu > summary { white-space: nowrap; }
 .iface-foot .badge.sites { max-width: 100%; white-space: nowrap; }
 
-/* Performance: device lanes do not animate (only the WAN and network trunks do), animations stop while the
+/* Performance: networks start collapsed (click one to show its devices), animations stop while the
    map is off screen (portal.js toggles .offscreen), and chart hover is one guide per chart. */
-.flowmap .flow.dev { animation: none !important; }
-.flowmap .flow.dev.lvl-0 { opacity: .2; }
 .flow-wrap.offscreen .flowmap .flow, .live.paused-anim .pulse { animation-play-state: paused; }
 .hover-guide, .hover-dot { opacity: 0; pointer-events: none; }
 .hover-guide { stroke: var(--outline); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
@@ -546,3 +544,13 @@ svg[data-tips] { cursor: crosshair; }
 .chart-tip { position: fixed; z-index: 30; pointer-events: none; padding: 5px 9px; border-radius: 8px; font-size: 12px; white-space: nowrap;
   background: var(--text); color: var(--surface); box-shadow: var(--shadow-2); font-variant-numeric: tabular-nums; }
 .chart-tip[hidden] { display: none; }
+
+/* Collapsible networks on the flow map. */
+.flowmap .seg-toggle { cursor: pointer; outline: none; }
+.flowmap .seg-toggle:hover .node.segment rect, .flowmap .seg-toggle:focus-visible .node.segment rect { stroke: var(--primary); stroke-width: 1.5; }
+.flowmap .node.segment.open rect { stroke: color-mix(in srgb, var(--primary) 45%, transparent); stroke-width: 1; }
+.flowmap .chevron { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.flowmap .seg-toggle:hover .chevron { stroke: var(--primary); }
+.flowmap .sub.hint { fill: var(--muted); }
+.flow-all { margin-left: 10px; height: 28px; padding: 0 10px; font-size: 12px; }
+.flowmap a, .flowmap a:hover { text-decoration: none; }
