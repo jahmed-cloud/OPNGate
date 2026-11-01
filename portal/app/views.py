@@ -108,7 +108,7 @@ def overview(request: Request, session: Session = Depends(require_user)):
     return render(
         request, "overview.html", session=session, range_key=key, ranges=list(RANGES), gw=gw, latest=latest,
         metrics=data, flow_gw=flow_gw, flow_wan=flow_wan, flow_segments=flow_segments, flow_height=flow_height,
-        refresh=15, **_device_controls(),
+        refresh=30, **_device_controls(),
         wan_state=wan_state, agent_online=agent_online, last_seen=last_seen, segments=segments,
         availability=data["summary"]["availability_pct"], outages=outages,
         latency=[p["latency_ms"] for p in data["points"]], loss=[p["loss_pct"] for p in data["points"]],
@@ -157,7 +157,7 @@ def clients(request: Request, session: Session = Depends(require_user)):
     rows = db.q(sql + " ORDER BY online DESC, segment, hostname, ip LIMIT 501", *args)
     segments = [r["segment"] for r in db.q("SELECT DISTINCT segment FROM clients WHERE segment IS NOT NULL ORDER BY segment")]
     return render(request, "clients.html", session=session, rows=[_client(r) for r in rows[:500]], segments=segments,
-                  segment=segment, show=show, q=term, limited=len(rows) > 500, now=db.now(), refresh=15,
+                  segment=segment, show=show, q=term, limited=len(rows) > 500, now=db.now(), refresh=30,
                   **_device_controls())
 
 
@@ -185,7 +185,7 @@ def traffic(request: Request, session: Session = Depends(require_user)):
     net_blocks = {key[1]: aid for aid, key in actions.active_effects().items() if key[0] == "network"}
     return render(
         request, "traffic.html", session=session, range_key=key, ranges=list(RANGES), interfaces=ifaces,
-        peak_iface=peak_iface, updated=ts, metrics=data, stats=stats, refresh=15,
+        peak_iface=peak_iface, updated=ts, metrics=data, stats=stats, refresh=30,
         net_pending=net_pending, net_blocks=net_blocks,
     )
 

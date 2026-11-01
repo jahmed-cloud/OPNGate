@@ -8,7 +8,7 @@
   --text: #18181b; --muted: #5f6170; --outline: #a1a1aa; --outline-soft: #e5e5ea;
   --ok: #15803d; --ok-container: #dcfce7; --bad: #dc2626; --bad-container: #fee2e2;
   --warn: #a16207; --warn-container: #fef3c7; --nodata: #d4d4d8;
-  --appbar: rgba(245,245,247,.82); --on-appbar: #18181b; --appbar-muted: #5f6170;
+  --appbar: #f5f5f7; --on-appbar: #18181b; --appbar-muted: #5f6170;
   --nav-bg: #0b0b0e; --nav-text: #b4b4bd; --nav-muted: #6b6b76; --nav-hover: rgba(255,255,255,.06);
   --nav-active: rgba(255,255,255,.10); --nav-accent: #ff8c42; --nav-border: #0b0b0e;
   --shadow-1: 0 1px 2px rgba(16,16,24,.05), 0 1px 3px rgba(16,16,24,.06);
@@ -25,7 +25,7 @@
     --text: #ececef; --muted: #a1a1aa; --outline: #52525b; --outline-soft: #222228;
     --ok: #4ade80; --ok-container: #12331d; --bad: #f87171; --bad-container: #3f1515;
     --warn: #fbbf24; --warn-container: #3a2a06; --nodata: #3f3f46;
-    --appbar: rgba(9,9,11,.82); --on-appbar: #ececef; --appbar-muted: #a1a1aa;
+    --appbar: #09090b; --on-appbar: #ececef; --appbar-muted: #a1a1aa;
     --nav-bg: #050506; --nav-text: #a1a1aa; --nav-muted: #5c5c66; --nav-hover: rgba(255,255,255,.05);
     --nav-active: rgba(255,122,46,.14); --nav-accent: #ff8c42; --nav-border: #1a1a1f;
     --shadow-1: none; --shadow-2: 0 8px 24px rgba(0,0,0,.5);
@@ -39,7 +39,7 @@
     --text: #ececef; --muted: #a1a1aa; --outline: #52525b; --outline-soft: #222228;
     --ok: #4ade80; --ok-container: #12331d; --bad: #f87171; --bad-container: #3f1515;
     --warn: #fbbf24; --warn-container: #3a2a06; --nodata: #3f3f46;
-    --appbar: rgba(9,9,11,.82); --on-appbar: #ececef; --appbar-muted: #a1a1aa;
+    --appbar: #09090b; --on-appbar: #ececef; --appbar-muted: #a1a1aa;
     --nav-bg: #050506; --nav-text: #a1a1aa; --nav-muted: #5c5c66; --nav-hover: rgba(255,255,255,.05);
     --nav-active: rgba(255,122,46,.14); --nav-accent: #ff8c42; --nav-border: #1a1a1f;
     --shadow-1: none; --shadow-2: 0 8px 24px rgba(0,0,0,.5);
@@ -327,7 +327,7 @@ form.inline { display: inline-flex; gap: 8px; margin: 0; align-items: center; }
 .scrim { display: none; }
 
 .appbar { height: 60px; padding: 0 24px; gap: 12px; background: var(--appbar); color: var(--on-appbar);
-  border-bottom: 1px solid var(--outline-soft); box-shadow: none; backdrop-filter: saturate(1.4) blur(10px); }
+  border-bottom: 1px solid var(--outline-soft); box-shadow: none; }
 .crumb { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; }
 .crumb .sec { color: var(--appbar-muted); font-weight: 500; }
 .crumb .sep { color: var(--outline); }
@@ -531,3 +531,18 @@ table.clients .device strong, table.clients td:nth-child(7) { white-space: nowra
 .iface-foot details.menu { flex: none; }
 .iface-foot details.menu > summary { white-space: nowrap; }
 .iface-foot .badge.sites { max-width: 100%; white-space: nowrap; }
+
+/* Performance: device lanes do not animate (only the WAN and network trunks do), animations stop while the
+   map is off screen (portal.js toggles .offscreen), and chart hover is one guide per chart. */
+.flowmap .flow.dev { animation: none !important; }
+.flowmap .flow.dev.lvl-0 { opacity: .2; }
+.flow-wrap.offscreen .flowmap .flow, .live.paused-anim .pulse { animation-play-state: paused; }
+.hover-guide, .hover-dot { opacity: 0; pointer-events: none; }
+.hover-guide { stroke: var(--outline); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.hover-dot { fill: var(--surface); stroke: currentColor; stroke-width: 2; }
+.time-chart .hover-dot { stroke: var(--chart-color, var(--primary)); }
+svg.hovering .hover-guide, svg.hovering .hover-dot { opacity: 1; }
+svg[data-tips] { cursor: crosshair; }
+.chart-tip { position: fixed; z-index: 30; pointer-events: none; padding: 5px 9px; border-radius: 8px; font-size: 12px; white-space: nowrap;
+  background: var(--text); color: var(--surface); box-shadow: var(--shadow-2); font-variant-numeric: tabular-nums; }
+.chart-tip[hidden] { display: none; }

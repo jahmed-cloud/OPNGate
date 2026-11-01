@@ -153,13 +153,13 @@ def time_chart(points, field: str, label: str, unit: str = "", cls: str = "prima
     esc = html.escape
     color = cls if cls in ("primary", "alt", "warn", "bad") else "primary"
     title = f"{label} ({unit}). Times in {_tz.get()}. Gaps indicate missing observations."
-    out = [f'<svg class="time-chart {color}" viewBox="0 0 640 188" role="img" aria-label="{esc(title)}">',
+    out = [f'<svg class="time-chart {color}" viewBox="0 0 640 188" role="img" aria-label="{esc(title)}" data-tips=\'{{tips}}\'>',
            f'<title>{esc(title)}</title>']
     for fraction in (0, .5, 1):
         y = bottom - fraction * (bottom - top)
         out.append(f'<line class="chart-grid" x1="{left}" x2="{right}" y1="{y}" y2="{y}"/>')
         out.append(f'<text class="chart-label" x="{left - 9}" y="{y + 4}" text-anchor="end">{_number(high * fraction)}</text>')
-    coords, groups, dots = [], [], []
+    coords, groups, tips = [], [], []
     for p in points:
         value = p.get(field)
         if not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -170,21 +170,33 @@ def time_chart(points, field: str, label: str, unit: str = "", cls: str = "prima
         x = left + (max(first, p["ts"]) - first) / time_span * (right - left)
         y = bottom - value / high * (bottom - top)
         coords.append(f"{x:.2f},{y:.2f}")
-        stamp = fmt_ts(p["ts"])
-        tooltip = f"{stamp} · {_number(value)} {unit}"
-        dots.append(f'<circle class="chart-point" cx="{x:.2f}" cy="{y:.2f}" r="2.5"><title>{esc(tooltip)}</title></circle>')
+        tips.append([round(x, 1), round(y, 1), f"{fmt_ts(p['ts'])} · {_number(value)} {unit}"])
     if coords:
         groups.append(coords)
     for group in groups:
         out.append(f'<polyline class="chart-line" points="{" ".join(group)}"/>')
-    out.extend(dots)
+    out.append(_hover_layer(tips, top, bottom, dot=True))
     for fraction, anchor in ((0, "start"), (.5, "middle"), (1, "end")):
         stamp = first + time_span * fraction
         fmt = "%d %b %H:%M" if time_span > 86400 else "%H:%M"
         out.append(f'<text class="chart-label" x="{left + fraction * (right - left):.1f}" y="178" text-anchor="{anchor}">'
                    f'{local(stamp).strftime(fmt)}</text>')
     out.append('</svg>')
-    return Markup("".join(out))
+    return Markup("".join(out).replace("{tips}", _tips_attr(tips), 1))
+
+
+def _tips_attr(tips) -> str:
+    """JSON for a single-quoted attribute: escaping only &, <, > and ' keeps it about a quarter smaller than
+    escaping every double quote."""
+    return html.escape(json.dumps(tips, separators=(",", ":"), ensure_ascii=False), quote=False).replace("'", "&#x27;")
+
+
+def _hover_layer(tips, top, bottom, dot=False) -> str:
+    """Hidden guide (and dot) that portal.js moves to the point nearest the pointer, reading data-tips.
+    One layer per chart instead of a dot and <title> per point keeps the DOM small."""
+    x = tips[0][0] if tips else 0
+    return (f'<line class="hover-guide" x1="{x}" x2="{x}" y1="{top}" y2="{bottom}"/>'
+            + (f'<circle class="hover-dot" cx="{x}" cy="{bottom}" r="3.5"/>' if dot else ""))
 
 
 def _nice_ceiling(value: float) -> float:
@@ -207,8 +219,8 @@ def _short_bps(value: float) -> str:
 
 
 def traffic_chart(points, start, end) -> Markup:
-    """WAN download (filled area) and upload (line) on one time axis, with one hover band per bucket
-    instead of hundreds of dots. Missing observations break both series."""
+    """WAN download (filled area) and upload (line) on one time axis, with one hover layer (see
+    _hover_layer). Missing observations break both series."""
     def ok(v):
         return isinstance(v, (int, float)) and math.isfinite(v)
     valid = [p for p in points if ok(p.get("rx_bps")) or ok(p.get("tx_bps"))]
@@ -222,7 +234,10 @@ def traffic_chart(points, start, end) -> Markup:
     x_of = lambda ts: left + (max(start, min(end, ts)) - start) / span * (right - left)  # noqa: E731
     y_of = lambda v: bottom - v / high * (bottom - top)  # noqa: E731
     title = f"WAN download and upload. Times in {_tz.get()}. Gaps indicate missing observations."
-    out = [f'<svg class="traffic-chart" viewBox="0 0 1000 296" role="img" aria-label="{esc(title)}"><title>{esc(title)}</title>']
+    tips = [[round(x_of(p["ts"]), 1), f'{fmt_ts(p["ts"])} · ↓ {fmt_bps(p.get("rx_bps"))} · ↑ {fmt_bps(p.get("tx_bps"))}']
+            for p in points if ok(p.get("rx_bps")) or ok(p.get("tx_bps"))]
+    out = [f'<svg class="traffic-chart" viewBox="0 0 1000 296" role="img" aria-label="{esc(title)}" '
+           f"data-tips='{_tips_attr(tips)}'><title>{esc(title)}</title>"]
     for i in range(5):
         v = high * i / 4
         y = y_of(v)
@@ -254,13 +269,7 @@ def traffic_chart(points, start, end) -> Markup:
             area = f"{g[0][0]:.1f},{bottom} {line} {g[-1][0]:.1f},{bottom}"
             out.append(f'<polygon class="traffic-area {cls}" points="{area}"/>')
             out.append(f'<polyline class="traffic-line {cls}" points="{line}"/>')
-    # Hover bands: one per bucket, carrying its exact time and both rates.
-    step = (right - left) / max(1, len(points))
-    for p in points:
-        x = x_of(p["ts"])
-        tip = f'{fmt_ts(p["ts"])} · ↓ {fmt_bps(p.get("rx_bps"))} · ↑ {fmt_bps(p.get("tx_bps"))}'
-        out.append(f'<rect class="hover-band" x="{x - step / 2:.1f}" y="{top}" width="{max(step, 2):.1f}" height="{bottom - top}">'
-                   f'<title>{esc(tip)}</title></rect>')
+    out.append(_hover_layer(tips, top, bottom))
     out.append("</svg>")
     return Markup("".join(out))
 
@@ -322,8 +331,14 @@ def sparkline(values, width: int = 600, height: int = 80, cls: str = "line") -> 
 def uptime_bar(segments, start=None, end=None) -> Markup:
     """segments: list of (fraction_width, state) where state is up/down/nodata.
     Drawn as SVG attributes, not inline styles, so the strict CSP still holds."""
+    runs = []
+    for width, state in segments:  # merge neighbours in the same state: a few rects instead of 240
+        if runs and runs[-1][1] == state:
+            runs[-1][0] += width
+        else:
+            runs.append([width, state])
     x, rects = 0.0, []
-    for width, state in segments:
+    for width, state in runs:
         label = {"up": "Observed up", "down": "Outage observed", "nodata": "No WAN observation"}.get(state, "Unknown")
         if start is not None and end is not None:
             label = f"{fmt_ts(start + x * (end - start))} — {fmt_ts(start + (x + width) * (end - start))}: {label}"

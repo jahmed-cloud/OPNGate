@@ -101,7 +101,7 @@ function startLive() {
   if (!main || !every) return;
   const chip = document.getElementById("live");
   const text = document.getElementById("live-text");
-  let paused = false, busy = false, last = Date.now(), failed = false;
+  let paused = false, busy = false, last = Date.now(), failed = false, lastHtml = "";
   try { paused = localStorage.getItem("portal-live-paused") === "1"; } catch (_) { /* storage blocked */ }
 
   const label = () => {
@@ -134,8 +134,12 @@ function startLive() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const html = await res.text();
       if (userBusy()) return;
-      main.innerHTML = html;
-      placeFlowControls();
+      if (html !== lastHtml) {  // nothing new since the last report: leave the DOM alone
+        lastHtml = html;
+        main.innerHTML = html;
+        placeFlowControls();
+        watchFlow();
+      }
       last = Date.now(); failed = false;
     } catch (_) {
       failed = true;
@@ -284,3 +288,47 @@ document.addEventListener("DOMContentLoaded", () => {
     sync();
   }
 });
+
+// Chart hover: svg[data-tips] holds [x, (y,) label] per point in viewBox units. One guide line, one dot and
+// one tooltip follow the pointer, instead of a dot and <title> per point.
+const tipCache = new WeakMap();
+let tipEl = null;
+function chartTip(e) {
+  const svg = e.target.closest && e.target.closest("svg[data-tips]");
+  document.querySelectorAll("svg.hovering").forEach((s) => { if (s !== svg) s.classList.remove("hovering"); });
+  if (!svg) { if (tipEl) tipEl.hidden = true; return; }
+  let tips = tipCache.get(svg);
+  if (!tips) { try { tips = JSON.parse(svg.dataset.tips || "[]"); } catch (_) { tips = []; } tipCache.set(svg, tips); }
+  if (!tips.length) return;
+  const box = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+  const x = (e.clientX - box.left) / box.width * vb.width;
+  let lo = 0, hi = tips.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (tips[mid][0] < x) lo = mid + 1; else hi = mid; }
+  if (lo > 0 && x - tips[lo - 1][0] < tips[lo][0] - x) lo -= 1;
+  const tip = tips[lo];
+  const guide = svg.querySelector(".hover-guide"), dot = svg.querySelector(".hover-dot");
+  guide?.setAttribute("x1", tip[0]); guide?.setAttribute("x2", tip[0]);
+  if (dot && tip.length > 2) { dot.setAttribute("cx", tip[0]); dot.setAttribute("cy", tip[1]); }
+  svg.classList.add("hovering");
+  if (!tipEl) { tipEl = document.createElement("div"); tipEl.className = "chart-tip"; tipEl.setAttribute("role", "status"); document.body.appendChild(tipEl); }
+  tipEl.textContent = tip[tip.length - 1];
+  tipEl.hidden = false;
+  const left = box.left + tip[0] / vb.width * box.width;
+  const w = tipEl.offsetWidth;
+  tipEl.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, left - w / 2)) + "px";
+  tipEl.style.top = Math.max(8, box.top - tipEl.offsetHeight - 6) + "px";
+}
+document.addEventListener("pointermove", chartTip, { passive: true });
+document.addEventListener("scroll", () => { if (tipEl) tipEl.hidden = true; }, { passive: true, capture: true });
+
+// Stop the flow animations while the map is scrolled out of view.
+let flowObserver = null;
+function watchFlow() {
+  if (!("IntersectionObserver" in window)) return;
+  flowObserver?.disconnect();
+  flowObserver = new IntersectionObserver((entries) => {
+    entries.forEach((en) => en.target.classList.toggle("offscreen", !en.isIntersecting));
+  });
+  document.querySelectorAll(".flow-wrap").forEach((el) => flowObserver.observe(el));
+}
+watchFlow();

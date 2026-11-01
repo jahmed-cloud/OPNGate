@@ -312,3 +312,18 @@ def test_crowdsec_bans_listed_without_blocklist_noise(client, monkeypatch):
     assert "192.0.2.50" in page and "crowdsecurity/http-probing" in page and "3h 59m" in page
     assert "10.0.0.1" not in page and "lists: 5" in page
     assert crowdsec._seconds("1h2m3s") == 3723
+
+
+def test_charts_use_one_hover_layer_and_merged_uptime_runs():
+    import json as _json
+    import re as _re
+    from app.templating import time_chart, traffic_chart, uptime_bar
+    now = 1_800_000_000
+    points = [{"ts": now + i * 60, "latency_ms": 5 + i % 3, "rx_bps": 1e6, "tx_bps": 2e5} for i in range(200)]
+    for svg in (str(time_chart(points, "latency_ms", "Latency", "ms", start=now, end=now + 12000)),
+                str(traffic_chart(points, now, now + 12000))):
+        assert svg.count("<circle") <= 1 and "<title>" in svg and svg.count("<title>") == 1
+        tips = _json.loads(_re.search(r"data-tips='([^']*)'", svg).group(1).replace("&amp;", "&"))
+        assert len(tips) == 200 and tips[0][0] < tips[-1][0]
+    bar = str(uptime_bar([(0.25, "up")] * 3 + [(0.25, "down")], now, now + 1000))
+    assert bar.count("<rect") == 2
