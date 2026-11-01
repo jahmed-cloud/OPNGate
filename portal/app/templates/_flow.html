@@ -7,6 +7,6 @@
   <p class="small muted" data-live-device-status>Device rates cover traffic observed by this firewall. Names and policy states refresh separately.</p>
   <p class="small muted" data-flow-load-status role="status"></p>
   <div class="flow-wrap {{ 'stale-flow' if not agent_online }}"><div class="flow-canvas">{{ flow_map(flow_gw, flow_wan, flow_segments, flow_height) }}
-    {% if session.is_operator %}{% for s in flow_segments %}{% for d in s.devices %}<div class="flow-ctrl" data-refresh-section="control-{{ d.mac }}" data-top="{{ d.top_pct }}" data-h="{{ d.h_pct }}">{{ dev.menu(d) }}</div>{% endfor %}{% endfor %}{% endif %}
+    {% if session.is_operator %}{% for s in flow_segments %}{% for d in s.devices %}<div class="flow-ctrl{{ ' compact' if s.compact }}" data-refresh-section="control-{{ d.mac }}" data-top="{{ d.top_pct }}" data-h="{{ d.h_pct }}">{{ dev.menu(d) }}</div>{% endfor %}{% endfor %}{% endif %}
   </div></div>
 </section>

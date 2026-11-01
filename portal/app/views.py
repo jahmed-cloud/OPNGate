@@ -10,9 +10,9 @@ from urllib.parse import unquote, urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
-from . import actions, crowdsec, db, live, metrics
+from . import actions, crowdsec, db, devices, live, metrics
 from .config import settings
-from .security import Session, audit, check_csrf, require_user
+from .security import Session, audit, check_csrf, require_operator, require_user
 from .templating import flow_layout, render
 
 router = APIRouter()
@@ -32,7 +32,8 @@ def _like(term: str) -> str:
 
 DEVICE_ACTIONS = ("pause_client", "resume_client", "limit_client", "unlimit_client", "block_domains", "unblock_domains")
 NETWORK_ACTIONS = ("block_network", "unblock_network")
-FLOW_DEVICES_PER_SEGMENT = 8
+FLOW_DEVICES_PER_SEGMENT = 150  # bounded; busy networks switch to compact rows (templating.flow_layout)
+NAME_MAX = 40
 
 
 def _client(row) -> dict:
@@ -78,18 +79,18 @@ def _flow_data(gw: dict, latest, open_segments=frozenset({"*"})) -> tuple:
             continue
         name = interface.get("segment") or interface.get("name")
         is_open = "*" in open_segments or name in open_segments
-        devices = []
+        shown = []
         if is_open:
-            for row in db.q("SELECT * FROM clients WHERE online=1 AND segment=? ORDER BY mac LIMIT ?", interface.get("segment"), FLOW_DEVICES_PER_SEGMENT):
+            for row in db.q(f"{devices.CLIENTS} WHERE c.online=1 AND c.segment=? ORDER BY c.mac LIMIT ?", interface.get("segment"), FLOW_DEVICES_PER_SEGMENT):
                 c = _client(row)
-                c["label"] = c.get("hostname") or c.get("vendor") or c.get("ip") or c["mac"]
-                devices.append(c)
+                c["label"] = devices.label(c)
+                shown.append(c)
         online = counts.get(interface.get("segment"), 0)
         segments.append({
             "name": name, "iface": interface.get("name"), "open": is_open,
             "down_bps": interface.get("tx_bps"), "up_bps": interface.get("rx_bps"),
-            "online": online, "devices": devices,
-            "more": max(0, online - len(devices)) if is_open else 0,
+            "online": online, "devices": shown,
+            "more": max(0, online - len(shown)) if is_open else 0,
         })
     return {**gw, "latency_ms": latest["latency_ms"] if latest else gw.get("latency_ms")}, wan, segments
 
@@ -193,20 +194,45 @@ def clients(request: Request, session: Session = Depends(require_user)):
     segment = request.query_params.get("segment", "")[:100]
     show = "all" if request.query_params.get("show") == "all" else "online"
     term = request.query_params.get("q", "").strip()[:200]
-    sql, args = "SELECT * FROM clients WHERE 1=1", []
+    sql, args = f"{devices.CLIENTS} WHERE 1=1", []
     if segment:
-        sql += " AND segment=?"
+        sql += " AND c.segment=?"
         args.append(segment)
     if show == "online":
-        sql += " AND online=1"
+        sql += " AND c.online=1"
     if term:
-        sql += " AND (hostname LIKE ? ESCAPE '\\' OR ip LIKE ? ESCAPE '\\' OR mac LIKE ? ESCAPE '\\' OR vendor LIKE ? ESCAPE '\\')"
-        args += [_like(term)] * 4
-    rows = db.q(sql + " ORDER BY online DESC, segment, hostname, ip LIMIT 501", *args)
+        sql += (" AND (l.name LIKE ? ESCAPE '\\' OR c.hostname LIKE ? ESCAPE '\\' OR c.ip LIKE ? ESCAPE '\\'"
+                " OR c.mac LIKE ? ESCAPE '\\' OR c.vendor LIKE ? ESCAPE '\\')")
+        args += [_like(term)] * 5
+    rows = db.q(sql + " ORDER BY c.online DESC, c.segment, COALESCE(l.name, c.hostname), c.ip LIMIT 501", *args)
     segments = [r["segment"] for r in db.q("SELECT DISTINCT segment FROM clients WHERE segment IS NOT NULL ORDER BY segment")]
     return render(request, "clients.html", session=session, rows=[_client(r) for r in rows[:500]], segments=segments,
                   segment=segment, show=show, q=term, limited=len(rows) > 500, now=db.now(), refresh=30,
                   **_device_controls())
+
+
+@router.post("/clients/label")
+async def label_device(request: Request, session: Session = Depends(require_operator)):
+    """Give a device a name and icon. Display only, so it is not a signed firewall action; an empty
+    name and the automatic icon put back what the network reports."""
+    await check_csrf(request, session)
+    form = await request.form()
+    mac = str(form.get("mac", "")).strip().lower()
+    if not actions.MAC_RE.match(mac):
+        raise HTTPException(400, "bad device")
+    name = " ".join("".join(ch for ch in str(form.get("name", "")) if ch.isprintable()).split())[:NAME_MAX]
+    icon = str(form.get("icon", ""))
+    icon = icon if icon in devices.ICONS else ""
+    if name or icon:
+        db.run("INSERT INTO device_labels(mac, name, icon, updated_by, updated_at) VALUES (?, ?, ?, ?, ?) "
+               "ON CONFLICT(mac) DO UPDATE SET name=excluded.name, icon=excluded.icon, "
+               "updated_by=excluded.updated_by, updated_at=excluded.updated_at",
+               mac, name or None, icon or None, session.username, db.now())
+    else:
+        db.run("DELETE FROM device_labels WHERE mac=?", mac)
+    audit("device_label", True, request, session.username, f"{mac} name={name!r} icon={icon or 'auto'}")
+    back = str(form.get("next", "/"))
+    return RedirectResponse(back if back in ("/", "/clients") else "/", 303)
 
 
 @router.get("/traffic")

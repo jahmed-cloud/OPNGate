@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app import db, metrics, views
 from app.main import app
+from app.config import settings
 from test_dashboard import sign_in
 
 
@@ -63,3 +64,49 @@ def test_history_refresh_leaves_client_owned_flow_untouched(browser, monkeypatch
     assert response.status_code == 200
     assert 'data-client-owned data-refresh-section="overview-8" id="flow-panel"' in response.text
     assert 'class="flowmap"' not in response.text
+
+
+H = {'Origin': settings.origin}
+
+
+def promote(csrf):
+    db.run("UPDATE users SET role='operator' WHERE id IN (SELECT user_id FROM sessions WHERE csrf=?)", csrf)
+
+
+def test_operator_names_device_and_picks_icon(browser):
+    csrf = sign_in(browser)
+    form = {'csrf': csrf, 'mac': '00:11:22:33:44:01', 'name': 'Kids  tablet\x07', 'icon': 'tablet', 'next': '/'}
+    assert browser.post('/clients/label', data=form, headers=H, follow_redirects=False).status_code == 403  # viewers cannot
+    promote(csrf)
+    assert browser.post('/clients/label', data={**form, 'csrf': 'wrong'}, headers=H, follow_redirects=False).status_code in (400, 403)
+    r = browser.post('/clients/label', data=form, headers=H, follow_redirects=False)
+    assert r.status_code == 303 and r.headers['location'] == '/'
+    assert dict(db.one('SELECT name, icon FROM device_labels WHERE mac=?', '00:11:22:33:44:01')) == {'name': 'Kids tablet', 'icon': 'tablet'}
+    browser.cookies.set('flow_open', 'LAN')
+    page = browser.get('/api/flow').text
+    assert 'Kids tablet' in page and 'Alpha' not in page.split('<svg')[1].split('</svg>')[0].replace('Alpha ·', '')
+    clients = browser.get('/clients?q=kids').text
+    assert 'Kids tablet' in clients and 'Beta' not in clients
+    # The agent's next report leaves the name alone; clearing both puts the network's name back.
+    db.run("UPDATE clients SET hostname='alpha-2' WHERE mac=?", '00:11:22:33:44:01')
+    assert 'Kids tablet' in browser.get('/api/flow').text
+    browser.post('/clients/label', data={**form, 'name': '', 'icon': 'bogus'}, headers=H, follow_redirects=False)
+    assert db.one('SELECT 1 FROM device_labels WHERE mac=?', '00:11:22:33:44:01') is None
+    assert 'alpha-2' in browser.get('/api/flow').text
+
+
+def test_busy_network_uses_compact_rows_for_120_devices(browser):
+    promote(sign_in(browser))
+    for i in range(120):
+        db.run('INSERT INTO clients(mac,hostname,segment,online,first_seen,last_seen,down_bps,up_bps) VALUES (?,?,?,1,?,?,?,?)',
+               f'00:aa:00:00:{i // 256:02x}:{i % 256:02x}', f'device-{i:03d}-with-a-long-hostname', 'LAN', db.now(), db.now(), i * 1000, 10)
+    browser.cookies.set('flow_open', 'LAN')
+    r = browser.get('/api/flow')
+    segment = r.context['flow_segments'][0]
+    assert len(segment['devices']) == 122 and segment['compact'] and segment['more'] == 0
+    height = r.context['flow_height']
+    assert height < 122 * 30 + 200  # compact rows, not 50-unit cards
+    assert r.text.count('class="node device compact') == 122 and 'class="lane trunk"' in r.text
+    assert r.text.count('class="flow-ctrl compact"') == 122
+    tops = [d['top_pct'] for d in segment['devices']]
+    assert tops == sorted(tops) and all(0 <= t < 100 for t in tops)

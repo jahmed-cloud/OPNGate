@@ -73,6 +73,18 @@
 {% endif %}
 {%- endmacro %}
 
+{% macro label_form(c) -%}
+<p class="menu-label">Name and icon</p>
+<form method="post" action="/clients/label" class="label-form"><input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="mac" value="{{ c.mac }}"><input type="hidden" name="next" value="{{ '/clients' if request.url.path == '/clients' else '/' }}">
+  <label>Name<input name="name" maxlength="40" value="{{ c.alias or '' }}" placeholder="{{ c.hostname or c.vendor or c.mac }}"></label>
+  <label>Icon<select name="icon"><option value="">Automatic</option>
+    {% for key, text in device_kinds.items() %}<option value="{{ key }}" {{ 'selected' if c.icon == key }}>{{ text }}</option>{% endfor %}</select></label>
+  <button class="small tonal">Save</button>
+</form>
+<p class="menu-note small muted">Shown in this portal only; leave the name empty for the network's name.</p>
+{%- endmacro %}
+
 {% macro menu(c) -%}
 {% set is_paused = c.paused or c.mac in paused %}
 {% set lim = c.limit %}
@@ -83,8 +95,9 @@
 {% if wait %}<a class="button-link small" href="/actions/{{ wait[0] }}">Approve…</a>
 {% else %}
 <details class="menu">
-  <summary>Manage<span class="sr-only"> {{ c.hostname or c.mac }}</span></summary>
+  <summary>Manage<span class="sr-only"> {{ c.alias or c.hostname or c.mac }}</span></summary>
   <div class="menu-panel">
+    {{ label_form(c) }}
     {% if is_paused %}
     <form method="post" action="/actions/new">{{ hidden('resume_client', c.mac) }}
       <button class="primary wide">Resume internet</button></form>

@@ -132,6 +132,14 @@ CREATE TABLE IF NOT EXISTS waf_hits (
     count INTEGER NOT NULL,
     PRIMARY KEY (day, host, kind)
 );
+-- Names and icons operators give devices; kept apart from clients, which the agent's reports rewrite.
+CREATE TABLE IF NOT EXISTS device_labels (
+    mac TEXT PRIMARY KEY,
+    name TEXT,
+    icon TEXT,
+    updated_by TEXT,
+    updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS kv (
     k TEXT PRIMARY KEY,
     v TEXT

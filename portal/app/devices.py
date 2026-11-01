@@ -60,6 +60,9 @@ _VENDOR = [(k, re.compile(p)) for k, p in VENDOR_RULES]
 
 
 def kind(client) -> str:
+    chosen = client.get("icon") if hasattr(client, "get") else None
+    if chosen in ICONS:
+        return chosen
     name = str((client.get("hostname") if hasattr(client, "get") else "") or "").lower()
     vendor = str((client.get("vendor") if hasattr(client, "get") else "") or "").lower()
     for k, rx in _NAME:
@@ -69,6 +72,14 @@ def kind(client) -> str:
         if vendor and rx.search(vendor):
             return k
     return "device"
+
+def label(client) -> str:
+    """The name shown for a device: the operator's name for it, else what the network reports."""
+    return client.get("alias") or client.get("hostname") or client.get("vendor") or client.get("ip") or client["mac"]
+
+
+# Clients joined with the names and icons operators chose (devices.label / kind read alias and icon).
+CLIENTS = "SELECT c.*, l.name AS alias, l.icon AS icon FROM clients c LEFT JOIN device_labels l ON l.mac = c.mac"
 
 # Ready-made category lists for a device (OPNsense Unbound blocklist ids; the agent allows the same set).
 BLOCK_LISTS = {

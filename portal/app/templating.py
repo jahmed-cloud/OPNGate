@@ -375,6 +375,9 @@ def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="", key="", interface=Non
 
 
 FLOW_ROW, FLOW_GAP, FLOW_TOP, FLOW_WIDTH = 50, 26, 26, 900  # device cards span x 630-880 (70%-97.8%)
+# A network showing more devices than this gets one-line cards on a shared trunk, so 100+ devices stay
+# readable (and each costs two short animated paths instead of two long curves).
+FLOW_COMPACT_AFTER, FLOW_ROW_COMPACT, FLOW_TRUNK_X = 12, 30, 574  # compact cards span x 600-895
 
 
 def flow_layout(segments: list) -> int:
@@ -382,17 +385,22 @@ def flow_layout(segments: list) -> int:
     hit area laid over each device card). Returns the viewBox height."""
     y = FLOW_TOP
     for s in segments:
-        rows = max(1, len(s.get("devices") or []) + (1 if s.get("more") else 0))
-        for i, d in enumerate(s.get("devices") or []):
-            d["y"] = y + FLOW_ROW * i + FLOW_ROW / 2
-        s["more_y"] = y + FLOW_ROW * (rows - 1) + FLOW_ROW / 2
-        s["y"] = y + rows * FLOW_ROW / 2
-        y += rows * FLOW_ROW + FLOW_GAP
+        shown = s.get("devices") or []
+        s["compact"] = compact = len(shown) > FLOW_COMPACT_AFTER
+        row = FLOW_ROW_COMPACT if compact else FLOW_ROW
+        rows = max(1, len(shown) + (1 if s.get("more") else 0))
+        for i, d in enumerate(shown):
+            d["y"] = y + row * i + row / 2
+            d["card_h"] = row - 4 if compact else 40
+        s["more_y"] = y + row * (rows - 1) + row / 2
+        # A long list hangs from its network box instead of centring the box halfway down it.
+        s["y"] = y + 34 if compact else y + rows * row / 2
+        y += rows * row + FLOW_GAP
     height = max(260, int(y - FLOW_GAP + FLOW_TOP))
     for s in segments:
         for d in s.get("devices") or []:
-            d["top_pct"] = round((d["y"] - 20) / height * 100, 3)
-            d["h_pct"] = round(40 / height * 100, 3)
+            d["top_pct"] = round((d["y"] - d["card_h"] / 2) / height * 100, 3)
+            d["h_pct"] = round(d["card_h"] / height * 100, 3)
     return height
 
 
@@ -427,11 +435,67 @@ def _short(text, n) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
 
 
+def _device_tags(d) -> list:
+    tags = []
+    if d.get("paused"):
+        tags.append(("paused", "Paused"))
+    elif d.get("limit"):
+        tags.append(("limited", f'Capped ↓{d["limit"].get("down_mbps", 0):g}'))
+    blocked = d.get("domains") or {}
+    sites, cats = len(blocked.get("list") or []), len(blocked.get("lists") or [])
+    if sites or cats:
+        what = [f"{sites} site{'s' if sites != 1 else ''}"] if sites else []
+        what += [f"{cats} list{'s' if cats != 1 else ''}"] if cats else []
+        tags.append(("sites", " + ".join(what)))
+    return tags
+
+
+FLOW_TAG_SHORT = {"paused": "Paused", "limited": "Capped", "sites": "Sites"}
+
+
+def _flow_compact(s) -> str:
+    """One-line device cards hanging off a vertical trunk: name and tags on the left, live rates on the right."""
+    e = html.escape
+    shown = s["devices"]
+    sy, tx = s["y"], FLOW_TRUNK_X
+    end = s["more_y"] if s.get("more") else shown[-1]["y"]
+    out = [f'<path class="lane trunk" d="M560,{sy} H{tx} V{end}"/>']
+    for d in shown:
+        dy, paused = d["y"], bool(d.get("paused"))
+        kind = "paused" if paused else "limited" if d.get("limit") else "ok"
+        if paused:
+            out.append(f'<path class="lane blocked" d="M{tx},{dy} H600"/>')
+        else:
+            out.append(_flow_pair(tx, dy, 600, dy, d.get("down_bps"), d.get("up_bps"), "dev", key=d["mac"], device=d))
+        tags = _device_tags(d)
+        tag_text = " ".join(FLOW_TAG_SHORT[k] for k, _ in tags)
+        plain = "paused" if paused else f'↓ {fmt_bps(d.get("down_bps"))} ↑ {fmt_bps(d.get("up_bps"))}'
+        speeds = "paused" if paused else (f'<tspan class="arr down">↓</tspan> {_live_client_value(d.get("down_bps"), "down_bps", d)} '
+                                           f'<tspan class="arr up">↑</tspan> {_live_client_value(d.get("up_bps"), "up_bps", d)}')
+        # Text runs from x=634 to 889; rates (squeezed into 110) on the right, tags after the name.
+        name_room = 255 - 110 - 8 - (len(tag_text) * 5.7 + 6 if tags else 0)
+        name = _short(d["label"], max(5, int(name_room / 6.6)))
+        tag_svg = "".join(f'<tspan class="tag {k}" dx="6">{FLOW_TAG_SHORT[k]}</tspan>' for k, _ in tags)
+        what = devices.kind(d)
+        h = d["card_h"]
+        detail = " · ".join(v for _, v in tags)
+        out.append(f'<g data-refresh-section="device-{e(d["mac"])}" class="node device compact {kind}">'
+                   f'<title>{e(d["label"])} · {e(devices.LABELS[what])} · {e(d.get("ip") or "")} · {e(d["mac"])}'
+                   f'{" · " + e(detail) if detail else ""}</title>'
+                   f'<rect x="600" y="{dy - h / 2}" width="295" height="{h}" rx="8"/>'
+                   f'<rect class="kind-bg" x="605" y="{dy - 10}" width="20" height="20" rx="6"/>'
+                   f'<path class="kind" transform="translate(608 {dy - 7}) scale(.58)" d="{devices.ICONS[what]}"/>'
+                   f'<circle class="dot" cx="624" cy="{dy + 8}" r="3"/>'
+                   f'<text class="title" x="634" y="{dy + 4}"><tspan>{e(name)}</tspan>{tag_svg}</text>'
+                   f'<text class="sub" x="889" y="{dy + 4}" text-anchor="end"{_fit(plain, 10, 110)}>{speeds}</text></g>')
+    return "".join(out)
+
+
 def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
     """Internet -> firewall -> segments -> each device, with live rates on every link.
     Call flow_layout(segments) first; devices carry down_bps/up_bps, paused, limit and domains."""
     height = height or flow_layout(segments)
-    mid = height / 2
+    mid = min(height / 2, 240)  # on a tall map the internet and firewall stay near the top
     e = html.escape
     parts = [f'<svg class="flowmap" data-refresh-section="flow-svg" viewBox="0 0 {FLOW_WIDTH} {height}" role="img" aria-label="Network traffic flow down to each device">']
     state = gw.get("state") or ("online" if gw.get("online") is True else "offline" if gw.get("online") is False else "unknown")
@@ -452,7 +516,9 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
     for s in segments:
         sy = s["y"]
         parts.append(_flow_pair(350, mid, 420, sy, s.get("down_bps"), s.get("up_bps"), key=s.get("iface") or s["name"], interface=s.get("iface")))
-        for d in s.get("devices") or []:
+        if s.get("compact"):
+            parts.append(_flow_compact(s))
+        for d in () if s.get("compact") else s.get("devices") or []:
             dy = d["y"]
             paused = bool(d.get("paused"))
             kind = "paused" if paused else "limited" if d.get("limit") else "ok"
@@ -460,17 +526,7 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
                 parts.append(f'<path class="lane blocked" d="M560,{sy} C595,{sy} 595,{dy} 630,{dy}"/>')
             else:
                 parts.append(_flow_pair(560, sy, 630, dy, d.get("down_bps"), d.get("up_bps"), "dev", key=d["mac"], device=d))
-            tags = []
-            if paused:
-                tags.append(("paused", "Paused"))
-            elif d.get("limit"):
-                tags.append(("limited", f'Capped ↓{d["limit"].get("down_mbps", 0):g}'))
-            blocked = d.get("domains") or {}
-            sites, cats = len(blocked.get("list") or []), len(blocked.get("lists") or [])
-            if sites or cats:
-                what = [f"{sites} site{'s' if sites != 1 else ''}"] if sites else []
-                what += [f"{cats} list{'s' if cats != 1 else ''}"] if cats else []
-                tags.append(("sites", " + ".join(what)))
+            tags = _device_tags(d)
             tag_text = " · ".join(v for _, v in tags)
             tag_svg = "".join(f'<tspan class="tag {k}">{" · " if i else ""}{e(v)}</tspan>' for i, (k, v) in enumerate(tags))
             # Card text runs from x=671 to 870; the name gets what the tag leaves (about 7 px per character).
@@ -490,9 +546,11 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
                          f'<text x="870" y="{dy - 3}" text-anchor="end"{_fit(tag_text, 10.5, 120)}>{tag_svg}</text></g>')
         if s.get("more"):
             my = s["more_y"]
-            parts.append(f'<path class="lane devices" d="M560,{sy} C595,{sy} 595,{my} 630,{my}"/>')
-            parts.append(f'<a href="/clients?segment={e(s["name"])}"><g class="node more"><rect x="630" y="{my - 17}" width="250" height="34" rx="10"/>'
-                         f'<text class="sub" x="646" y="{my + 4}">+{s["more"]} more on {e(s["name"])} → Clients</text></g></a>')
+            mx, mw, mh = (600, 295, FLOW_ROW_COMPACT - 4) if s.get("compact") else (630, 250, 34)
+            lane = f"M{FLOW_TRUNK_X},{my} H600" if s.get("compact") else f"M560,{sy} C595,{sy} 595,{my} 630,{my}"
+            parts.append(f'<path class="lane devices" d="{lane}"/>')
+            parts.append(f'<a href="/clients?segment={e(s["name"])}"><g class="node more"><rect x="{mx}" y="{my - mh / 2}" width="{mw}" height="{mh}" rx="10"/>'
+                         f'<text class="sub" x="{mx + 16}" y="{my + 4}">+{s["more"]} more on {e(s["name"])} → Clients</text></g></a>')
         count = s.get("online", 0)
         if not s.get("open", True):
             if count:
@@ -544,4 +602,4 @@ def interface_icon(segment="", interface="", wan=False):
                   f'<title>{label}</title><path d="{interface_icons.ICONS[what]}"/></svg>')
 
 
-templates.env.globals.update(interface_icon=interface_icon, traffic_chart=traffic_chart, rate_bars=rate_bars, block_lists=devices.BLOCK_LISTS, device_icon=device_icon, sparkline=sparkline, time_chart=time_chart, waf_chart=waf_chart, uptime_bar=uptime_bar, flow_map=flow_map)
+templates.env.globals.update(device_kinds=devices.LABELS, interface_icon=interface_icon, traffic_chart=traffic_chart, rate_bars=rate_bars, block_lists=devices.BLOCK_LISTS, device_icon=device_icon, sparkline=sparkline, time_chart=time_chart, waf_chart=waf_chart, uptime_bar=uptime_bar, flow_map=flow_map)

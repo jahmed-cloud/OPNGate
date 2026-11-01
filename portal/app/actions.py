@@ -261,7 +261,8 @@ def create(kind: str, params: dict, username: str) -> str:
 def actions_page(request: Request, session: Session = Depends(require_operator)):
     rows = db.q("SELECT * FROM actions ORDER BY created_at DESC LIMIT 100")
     has_key = db.one("SELECT 1 FROM credentials WHERE user_id=?", session.user_id) is not None
-    clients = db.q("SELECT mac, hostname, ip FROM clients ORDER BY hostname")
+    clients = db.q("SELECT c.mac, COALESCE(l.name, c.hostname) AS hostname, c.ip FROM clients c "
+                   "LEFT JOIN device_labels l ON l.mac = c.mac ORDER BY 2")
     _, vpn = db.get_snapshot("vpn", [])
     return render(
         request, "actions.html", session=session, rows=rows, labels=ACTION_LABELS, has_key=has_key,

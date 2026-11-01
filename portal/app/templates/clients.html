@@ -22,7 +22,7 @@
   {% for c in rows %}
   <tr class="{{ 'offline' if not c.online }}" data-refresh-section="client-{{ c.mac }}">
     <td><div class="device"><span class="kind-box">{{ device_icon(c) }}<span class="dot {{ 'on' if c.online else 'off' }}" title="{{ 'online' if c.online else 'offline' }}"></span></span>
-      <div><strong>{{ c.hostname or '(no name)' }}</strong><div class="small muted">{{ c.vendor or 'Unknown maker' }}</div></div></div></td>
+      <div><strong>{{ c.alias or c.hostname or '(no name)' }}</strong><div class="small muted">{% if c.alias and c.hostname %}{{ c.hostname }} · {% endif %}{{ c.vendor or 'Unknown maker' }}</div></div></div></td>
     <td><span class="mono">{{ c.ip or '—' }}</span><div class="small muted mono">{{ c.mac }}</div></td>
     <td>{{ c.segment or '—' }}</td>
     <td class="num speed down" data-live-client="{{ c.mac }}" data-client-ip="{{ c.ip or '' }}" data-client-segment="{{ c.segment or '' }}" data-live-client-rate="down_bps">{{ c.down_bps | bps if c.online else '—' }}</td>

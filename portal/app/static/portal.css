@@ -581,3 +581,18 @@ svg[data-tips] { cursor: crosshair; }
 .page-hidden .flowmap .flow, .page-hidden .live .pulse,
 .live-paused .flowmap .flow { animation-play-state: paused !important; }
 [data-flow-load-status]:empty { display: none; }
+
+/* Busy networks: one-line device cards on a shared trunk; a tall map scrolls inside its card. */
+.flow-wrap { max-height: 78vh; overflow-y: auto; overscroll-behavior: contain; }
+.flowmap .lane.trunk { stroke-width: 4; }
+.flowmap .node.device.compact .title { font-size: 12px; }
+.flowmap .node.device.compact .sub { font-size: 10px; }
+.flowmap .node.device.compact .tag { font-size: 9.5px; }
+.flowmap .node.device.compact .kind { stroke-width: 2.6; }
+.flow-ctrl.compact { left: 66.667%; width: 32.778%; }
+.flow-ctrl.compact details.menu > summary::after { bottom: 50%; transform: translateY(50%); }
+.flow-ctrl.compact details.menu > summary::before { bottom: 50%; transform: translateY(50%); }
+.label-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; align-items: end; margin-bottom: 4px; }
+.label-form label { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); }
+.label-form input, .label-form select { width: 100%; min-width: 0; height: 36px; margin: 0; }
+.label-form button { grid-column: 1 / -1; width: 100%; height: 36px; justify-content: center; }
