@@ -1,0 +1,35 @@
+# Settings for deploy/deploy.sh. Copy to deploy/deploy.conf (git-ignored) and edit.
+# Everything runs from your admin PC over SSH; the boxes need SSH key login for root.
+
+DOMAIN=example.com              # portal at https://waf.example.com (Cloudflare DNS record, proxied)
+PORTAL_TITLE="WAF-OPNsense"     # name shown in the portal and on passkey prompts
+TZ=UTC                          # fallback time zone for pages (browsers send their own), e.g. Asia/Kolkata
+
+SSH_KEY=~/.ssh/id_ed25519
+REMOTE_DIR=/opt/gateway
+
+# OPNsense firewall. FIREWALL is the SSH target (its management address is fine).
+FIREWALL=root@10.99.99.1
+FIREWALL_LAN_IP=10.10.0.1
+
+# Raspberry Pi 5 (edge: Caddy + Coraza WAF + CrowdSec agent) and Pi 4 (services: portal + CrowdSec API).
+EDGE=root@10.10.0.21
+EDGE_IP=10.10.0.21
+SERVICES=root@10.10.0.22
+SERVICES_IP=10.10.0.22
+
+# Host firewall on the Pis while there are no VLANs (deploy/hostfw).
+INSTALL_HOSTFW=yes
+LAN_IF=eth0
+LAN_NET=10.10.0.0/24
+ADMIN_IP=10.99.99.110           # your PC: the only address allowed to SSH to the Pis
+UPSTREAMS="10.10.0.21:8384 10.10.0.21:8090 10.10.0.21:8900"   # apps Caddy may reach, ip:port
+
+# Firewall rules for pause/block: inside interfaces (OPNsense names) and the WAN.
+PAUSE_INTERFACES="lan,opt2"
+WAN_INTERFACE=wan
+
+WAF_MODE=DetectionOnly          # switch to On after a week of clean detections
+HOME_IP=                        # your static public IP: never banned by CrowdSec (optional)
+ADMIN_USER=admin                # first portal user, created on the first run (you type the password)
+INSTALL_DOCKER=no               # yes = install Docker on the Pis with get.docker.com if missing

@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import os
+import re
 import ssl
 import sys
 import threading
@@ -67,8 +68,53 @@ def parse_coraza(line: str):
     return str(host or "?")[:120], "waf_blocked" if interrupted else "waf_detected", stamp or None
 
 
-def read_new(path: Path, parser, offset: int, max_lines: int = 2000) -> tuple:
-    """Return (new_offset, Counter of (day, host, kind)) for complete lines after offset."""
+_RULE_ID = re.compile(r'\[id "(\d+)"\]')
+_RULE_MSG = re.compile(r'\[msg "([^"]{0,200})"\]')
+_RULE_SEV = re.compile(r'\[severity "([^"]{0,20})"\]')
+# CRS bookkeeping rules (anomaly score totals, reporting); listed only when nothing else matched.
+_SUMMARY_RULE = re.compile(r"^(949|959|980)\d{3}$")
+MAX_EVENTS = 200
+
+
+def coraza_detail(line: str):
+    """One audit record as a small event for the Threats page: who, where, which rules.
+    Headers and bodies are never logged (SecAuditLogParts AHZ); the query string is dropped."""
+    entry = json.loads(line)
+    tx = entry.get("transaction") if isinstance(entry, dict) else None
+    if not isinstance(tx, dict):
+        return None
+    req = tx.get("request") if isinstance(tx.get("request"), dict) else {}
+    rules = []
+    for m in entry.get("messages") or tx.get("messages") or []:
+        text = (m.get("error_message") or m.get("message") or "") if isinstance(m, dict) else ""
+        rule_id = _RULE_ID.search(text)
+        if rule_id:
+            msg, sev = _RULE_MSG.search(text), _RULE_SEV.search(text)
+            rules.append({"id": rule_id.group(1), "msg": msg.group(1) if msg else "",
+                          "severity": sev.group(1) if sev else ""})
+    real = [r for r in rules if not _SUMMARY_RULE.match(r["id"])]
+    interrupted = tx.get("is_interrupted") is True
+    if not (rules or interrupted):
+        return None
+    stamp = float(tx.get("unix_timestamp") or 0)
+    stamp = stamp / 1e9 if stamp > 10**14 else stamp
+    producer = tx.get("producer") if isinstance(tx.get("producer"), dict) else {}
+    return {
+        "ts": int(stamp) if math.isfinite(stamp) and stamp > 0 else int(time.time()),
+        "host": str(req.get("host") or tx.get("server_id") or "?")[:120],
+        "client_ip": str(tx.get("client_ip") or "")[:45],
+        "method": str(req.get("method") or "")[:10],
+        "path": str(req.get("uri") or "").split("?", 1)[0][:200],
+        "rules": (real or rules)[:5],
+        "blocked": interrupted,
+        "engine": str(producer.get("rule_engine") or "")[:20],
+    }
+
+
+def read_new(path: Path, parser, offset: int, max_lines: int = 2000, events: list | None = None,
+             detail=None) -> tuple:
+    """Return (new_offset, Counter of (day, host, kind)) for complete lines after offset.
+    With events and detail, also collect up to MAX_EVENTS detail records."""
     hits = Counter()
     if not path.exists():
         return offset, hits
@@ -86,13 +132,17 @@ def read_new(path: Path, parser, offset: int, max_lines: int = 2000) -> tuple:
                     host, kind, ts = hit
                     day = time.strftime("%Y-%m-%d", time.gmtime(float(ts) if ts else time.time()))
                     hits[(day, str(host or "?")[:120], kind)] += 1
+                    if events is not None and detail and len(events) < MAX_EVENTS:
+                        record = detail(line)
+                        if record:
+                            events.append(record)
             except (ValueError, AttributeError, TypeError, OverflowError, OSError):
                 hit = None
             offset = fh.tell()
     return offset, hits
 
 
-SOURCES = (("coraza", lambda: settings.coraza_audit_log, parse_coraza),)
+SOURCES = (("coraza", lambda: settings.coraza_audit_log, parse_coraza, coraza_detail),)
 
 
 def store(hits: Counter, batch_id: str | None = None, heartbeat: bool = False) -> bool:
@@ -113,15 +163,52 @@ def store(hits: Counter, batch_id: str | None = None, heartbeat: bool = False) -
     return True
 
 
+def clean_event(e) -> dict | None:
+    """Validate one event from the shipper (or the local reader) before storing it."""
+    if not isinstance(e, dict):
+        return None
+    ts = e.get("ts")
+    if type(ts) is not int or ts <= 0:
+        return None
+    rules = [r for r in (e.get("rules") or []) if isinstance(r, dict)][:5]
+    return {
+        "ts": ts, "host": str(e.get("host") or "?")[:120], "client_ip": str(e.get("client_ip") or "")[:45],
+        "method": str(e.get("method") or "")[:10], "path": str(e.get("path") or "")[:200],
+        "rules": [{"id": str(r.get("id") or "")[:10], "msg": str(r.get("msg") or "")[:200],
+                   "severity": str(r.get("severity") or "")[:20]} for r in rules],
+        "blocked": e.get("blocked") is True, "engine": str(e.get("engine") or "")[:20],
+    }
+
+
+def store_events(events) -> None:
+    from . import db
+
+    rows = [e for e in map(clean_event, events if isinstance(events, list) else []) if e]
+    if not rows:
+        return
+    with db.tx() as conn:
+        conn.executemany(
+            "INSERT INTO waf_events(ts, host, client_ip, method, path, rules, blocked) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(e["ts"], e["host"], e["client_ip"], e["method"], e["path"], json.dumps(e["rules"]), int(e["blocked"]))
+             for e in rows],
+        )
+        latest = max(rows, key=lambda e: e["ts"])
+        if latest["engine"]:
+            conn.execute("INSERT INTO kv(k,v) VALUES ('waf_engine',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                         (f'{latest["engine"]}|{latest["ts"]}',))
+
+
 # ------------------------------------------------------------------ local mode
 
 def scan_once() -> None:
     from . import db
 
-    for name, path, parser in SOURCES:
+    for name, path, parser, detail in SOURCES:
         key = f"waf_offset_{name}"
-        offset, hits = read_new(path(), parser, int(db.kv_get(key, "0")))
+        events = []
+        offset, hits = read_new(path(), parser, int(db.kv_get(key, "0")), events=events, detail=detail)
         store(hits, heartbeat=path().exists())
+        store_events(events)
         db.kv_set(key, str(offset))
 
 
@@ -163,12 +250,14 @@ def ship_forever() -> None:
             if pending_file.exists():
                 pending = json.loads(pending_file.read_text())
             else:
-                new_offsets, hits = dict(offsets), Counter()
-                for name, path, parser in SOURCES:
-                    new_offsets[name], found = read_new(path(), parser, int(offsets.get(name, 0)))
+                new_offsets, hits, events = dict(offsets), Counter(), []
+                for name, path, parser, detail in SOURCES:
+                    new_offsets[name], found = read_new(path(), parser, int(offsets.get(name, 0)),
+                                                        events=events, detail=detail)
                     hits.update(found)
                 pending = {"offsets": new_offsets, "body": {"batch_id": uuid.uuid4().hex,
-                    "hits": [{"day": d, "host": h, "kind": k, "count": c} for (d, h, k), c in hits.items()]}}
+                    "hits": [{"day": d, "host": h, "kind": k, "count": c} for (d, h, k), c in hits.items()],
+                    "events": events}}
                 _save_json(pending_file, pending)
             req = urllib.request.Request(url, data=json.dumps(pending["body"]).encode(), method="POST", headers={
                 "Content-Type": "application/json", "Authorization": f"Bearer {token}"})

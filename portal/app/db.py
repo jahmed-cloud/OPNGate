@@ -141,6 +141,17 @@ CREATE TABLE IF NOT EXISTS waf_batches (
     received_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS waf_batches_received ON waf_batches(received_at);
+CREATE TABLE IF NOT EXISTS waf_events (
+    id INTEGER PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    host TEXT NOT NULL,
+    client_ip TEXT,
+    method TEXT,
+    path TEXT,
+    rules TEXT,
+    blocked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS waf_events_ts ON waf_events(ts);
 """
 
 _local = threading.local()
@@ -159,8 +170,19 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to old databases.
+MIGRATIONS = {"clients": (("down_bps", "REAL"), ("up_bps", "REAL"), ("paused", "INTEGER NOT NULL DEFAULT 0"),
+                          ("speed_limit", "TEXT"))}
+
+
 def init() -> None:
-    connect().executescript(SCHEMA)
+    conn = connect()
+    conn.executescript(SCHEMA)
+    for table, columns in MIGRATIONS.items():
+        have = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns:
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
 
 @contextmanager
@@ -220,6 +242,7 @@ def prune() -> None:
     run("DELETE FROM samples WHERE ts < ?", cutoff)
     run("DELETE FROM events WHERE ts < ?", cutoff)
     run("DELETE FROM waf_batches WHERE received_at < ?", cutoff)
+    run("DELETE FROM waf_events WHERE ts < ?", now() - 30 * 86400)
     run("DELETE FROM audit WHERE ts < ?", now() - 365 * 86400)
     run("DELETE FROM challenges WHERE expires_at < ?", now())
     run("DELETE FROM sessions WHERE created_at < ?", now() - settings.absolute_timeout)

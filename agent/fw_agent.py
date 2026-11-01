@@ -30,7 +30,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 log = logging.getLogger("fw-agent")
 
 DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
@@ -38,9 +38,9 @@ DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
 
 # =============================================================== helpers
 
-def run(cmd, timeout=20, check=False, input_data=None):
+def run(cmd, timeout=20, check=False, input_data=None, cwd=None):
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=input_data)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=input_data, cwd=cwd)
     except (OSError, subprocess.TimeoutExpired) as exc:
         if check:
             raise ActionFailed(f"{cmd[0]}: {exc}") from exc
@@ -76,7 +76,7 @@ class State:
                 self.data = json.load(fh)
         except (OSError, ValueError):
             self.data = {}
-        for key, default in (("offsets", {}), ("seen_actions", {}), ("sign_counts", {}), ("blocks", {}), ("paused", {})):
+        for key, default in (("offsets", {}), ("seen_actions", {}), ("sign_counts", {}), ("blocks", {}), ("paused", {}), ("limits", {})):
             self.data.setdefault(key, default)
 
     def save(self):
@@ -165,6 +165,76 @@ class Rates:
         return out
 
 
+def _state_addr(token):
+    """'192.168.20.180:50009' -> '192.168.20.180'; IPv6 is printed as 'fe80::1[443]'."""
+    return token.split("[", 1)[0] if "[" in token else token.rsplit(":", 1)[0]
+
+
+class ClientRates:
+    """Per-device download/upload from pf state byte counters (pfctl -vvss), as the change between
+    two polls. Only states on inside interfaces count, so NAT's WAN copy of a state is not added twice.
+    Bytes of a state that opened and closed between two polls are missed; good enough for a live view."""
+
+    def __init__(self):
+        self.prev, self.at = {}, None
+
+    @staticmethod
+    def parse(text):
+        """Yield (state_id, iface, initiator_ip, responder_ip, bytes_from_initiator, bytes_to_initiator)."""
+        block = None
+        for line in text.splitlines() + [""]:
+            if line and not line[0].isspace():
+                if block and block.get("id"):
+                    yield block["id"], block.get("iface"), block["init"], block["resp"], block["a"], block["b"]
+                f = line.split()
+                block = None
+                if len(f) >= 5 and f[3] in ("<-", "->"):
+                    # "<-": the state was created inbound, right side is the initiator.
+                    # "->": created outbound, left side initiated; a NATed original follows in ().
+                    if f[3] == "<-":
+                        block = {"init": _state_addr(f[4]), "resp": _state_addr(f[2])}
+                    else:
+                        dest = f[5] if f[4].startswith("(") and len(f) > 5 else f[4]
+                        block = {"init": _state_addr(f[2]), "resp": _state_addr(dest)}
+                    block.update(a=0, b=0)
+                continue
+            if block is None:
+                continue
+            m = re.search(r"(\d+):(\d+) bytes", line)
+            if m:
+                block["a"], block["b"] = int(m.group(1)), int(m.group(2))
+            m = re.search(r"\bid: ([0-9a-f]+)", line)
+            if m:
+                block["id"] = m.group(1)
+            m = re.search(r"origif: (\S+)", line)
+            if m:
+                block["iface"] = m.group(1)
+
+    def sample(self, cfg):
+        """{ip: (down_bps, up_bps)}; empty on the first call."""
+        wan = {name for name, seg in cfg.get("segments", {}).items() if seg.upper() == "WAN"}
+        code, stdout, _ = run(["pfctl", "-vvss"])
+        if code != 0:
+            return {}
+        now = time.monotonic()
+        current, moved = {}, {}
+        for sid, iface, init, resp, a, b in self.parse(stdout):
+            if iface in wan:
+                continue
+            current[sid] = (a, b)
+            pa, pb = self.prev.get(sid, (0, 0))
+            da, db = max(0, a - pa), max(0, b - pb)
+            for ip, down, up in ((init, db, da), (resp, da, db)):
+                totals = moved.setdefault(ip, [0, 0])
+                totals[0] += down
+                totals[1] += up
+        first, elapsed = self.at is None, now - (self.at or now)
+        self.prev, self.at = current, now
+        if first or elapsed <= 0:
+            return {}
+        return {ip: (round(d * 8 / elapsed), round(u * 8 / elapsed)) for ip, (d, u) in moved.items()}
+
+
 def _leases(cfg):
     """mac -> {ip, hostname} from dnsmasq, Kea or ISC dhcpd lease files (whichever exist)."""
     leases = {}
@@ -208,8 +278,11 @@ def _arp_max_age():
     return int(num(stdout.strip(), 1200)) if code == 0 else 1200
 
 
-def clients(cfg):
+def clients(cfg, client_rates=None, state=None):
     segments = cfg.get("segments", {})
+    speeds = client_rates.sample(cfg) if client_rates else {}
+    paused = (state["paused"] if state else {})
+    limits = (state["limits"] if state else {})
     leases = _leases(cfg)
     max_age = _arp_max_age()
     seen = {}
@@ -225,12 +298,30 @@ def clients(cfg):
         # already counted down is roughly how long it has been quiet.
         expires = entry.get("expires")
         idle = max(0, max_age - int(expires)) if isinstance(expires, (int, float)) else None
-        seen[mac] = {"mac": mac, "ip": entry.get("ip-address"), "hostname": lease.get("hostname", ""),
-                     "segment": segments.get(iface, iface), "online": True, "idle_s": idle}
+        ip = entry.get("ip-address")
+        down, up = speeds.get(ip, (0, 0)) if speeds else (None, None)
+        seen[mac] = {"mac": mac, "ip": ip, "hostname": lease.get("hostname", ""),
+                     "segment": segments.get(iface, iface), "online": True, "idle_s": idle,
+                     "down_bps": down, "up_bps": up}
     for mac, lease in leases.items():
         if mac not in seen:
             seen[mac] = {"mac": mac, "ip": lease.get("ip"), "hostname": lease.get("hostname", ""), "segment": None, "online": False}
+    for mac, rec in seen.items():
+        rec["paused"] = mac in paused
+        if mac in limits:
+            rec["limit"] = {"down_mbps": limits[mac]["down_mbps"], "up_mbps": limits[mac]["up_mbps"],
+                            "until": limits[mac].get("until", 0)}
     return list(seen.values())
+
+
+def _opn_interfaces(path="/conf/config.xml"):
+    """Device name -> OPNsense interface name (igc1 -> lan), as the shaper model wants it."""
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return {}
+    ifaces = root.find("interfaces")
+    return {} if ifaces is None else {(node.findtext("if") or ""): node.tag for node in ifaces}
 
 
 def _wg_names_from_config(path="/conf/config.xml"):
@@ -484,6 +575,24 @@ def validate_params(kind, params, cfg):
                 raise ActionRejected("minutes out of range")
             return {"mac": mac, "minutes": minutes}
         return {"mac": mac}
+    if kind in ("limit_client", "unlimit_client"):
+        mac = str(params.get("mac", ""))
+        if not MAC_RE.match(mac):
+            raise ActionRejected("bad mac")
+        if mac in [m.lower() for m in acfg.get("protected_macs", [])]:
+            raise ActionRejected("mac is protected")
+        if kind == "unlimit_client":
+            return {"mac": mac}
+        speeds = {}
+        for key in ("down_mbps", "up_mbps"):
+            value = params.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.1 <= value <= 1000:
+                raise ActionRejected(f"{key} must be 0.1-1000")
+            speeds[key] = float(value)
+        minutes = params.get("minutes")
+        if not isinstance(minutes, int) or not 0 <= minutes <= 10080:
+            raise ActionRejected("minutes out of range")
+        return {"mac": mac, **speeds, "minutes": minutes}
     if kind == "breakglass":
         if not isinstance(params.get("enable"), bool):
             raise ActionRejected("enable must be true/false")
@@ -580,6 +689,48 @@ def _ips_for_mac(mac):
     return sorted({ip for ip in ips if ip})
 
 
+SHAPER_PHP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shaper.php")
+
+
+def _shaper(*args):
+    """Run shaper.php (OPNsense Traffic Shaper model) and apply it like the GUI's Apply button."""
+    code, stdout, stderr = run(["php", SHAPER_PHP, *args], cwd="/usr/local/opnsense/mvc")
+    try:
+        result = json.loads(stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        result = {"ok": False, "error": (stderr or stdout).strip()[:200]}
+    if not result.get("ok"):
+        raise ActionFailed(f"shaper: {result.get('error')}")
+    if args[0] != "list":
+        for step in ("template reload OPNsense/Shaper", "template reload OPNsense/IPFW", "shaper reload", "ipfw reload"):
+            run(["configctl", *step.split()])
+    return result
+
+
+def _set_limit(mac, rec):
+    ips = [ip for ip in _ips_for_mac(mac) if ":" not in ip]
+    if not ips:
+        raise ActionFailed("no current IPv4 address for that MAC (device offline?)")
+    device = next((e.get("interface") for e in arp_table() if str(e.get("mac-address", "")).lower() == mac), None)
+    iface = _opn_interfaces().get(device or "")
+    if not iface:
+        raise ActionFailed(f"cannot map interface {device} to an OPNsense interface")
+    _shaper("set", f"portal-{mac}", ips[0], iface, str(int(rec["down_mbps"] * 1000)), str(int(rec["up_mbps"] * 1000)))
+    rec["ip"] = ips[0]
+
+
+def _clear_limit(mac):
+    _shaper("clear", f"portal-{mac}")
+    # The shaper reload leaves deleted pipes in the kernel; drop ours (numbers 10000+) that nothing uses.
+    code, stdout, _ = run(["dnctl", "pipe", "show"])
+    used = set()
+    for limits in (_shaper("list").get("limits") or {}).values():
+        used.update(str(n) for n in limits.get("numbers", []))
+    for number in re.findall(r"^(\d{5}):", stdout, re.M):
+        if int(number) >= 10000 and number not in used:
+            run(["dnctl", "pipe", number, "delete"])
+
+
 def execute(payload, cfg, state):
     acfg = cfg["actions"]
     kind, p = payload["type"], payload["params"]
@@ -614,6 +765,16 @@ def execute(payload, cfg, state):
         if ips:
             run(["pfctl", "-t", acfg.get("pause_table", "portal_paused"), "-T", "delete", *ips])
         return f"{p['mac']} resumed"
+    if kind == "limit_client":
+        rec = {"down_mbps": p["down_mbps"], "up_mbps": p["up_mbps"],
+               "until": now + p["minutes"] * 60 if p["minutes"] else 0}
+        _set_limit(p["mac"], rec)
+        state["limits"][p["mac"]] = rec
+        return f"{p['mac']} limited to {p['down_mbps']:g}/{p['up_mbps']:g} Mbit/s (down/up) on {rec['ip']}"
+    if kind == "unlimit_client":
+        state["limits"].pop(p["mac"], None)
+        _clear_limit(p["mac"])
+        return f"speed limit removed from {p['mac']}"
     if kind == "breakglass":
         iface = acfg.get("breakglass_interface")
         if not iface:
@@ -657,6 +818,19 @@ def housekeeping(cfg, state):
         if new_ips:
             run(["pfctl", "-t", table, "-T", "add", *new_ips])
             rec["ips"] += new_ips
+    for mac, rec in list(state["limits"].items()):
+        try:
+            if rec.get("until") and rec["until"] <= now:
+                del state["limits"][mac]
+                _clear_limit(mac)
+                log.info("speed limit on %s expired", mac)
+                continue
+            ips = [ip for ip in _ips_for_mac(mac) if ":" not in ip]
+            if ips and rec.get("ip") not in ips:
+                _set_limit(mac, rec)
+                log.info("speed limit on %s moved to %s", mac, rec["ip"])
+        except ActionFailed as exc:
+            log.warning("speed limit upkeep for %s: %s", mac, exc)
     cutoff = now - 7 * 86400
     state.data["seen_actions"] = {k: v for k, v in state["seen_actions"].items() if v > cutoff}
 
@@ -702,7 +876,7 @@ def _report(portal, action_id, ok, message):
 
 # =============================================================== main loop
 
-def collect(cfg, rates):
+def collect(cfg, rates, client_rates=None, state=None):
     def safe(fn, *args):
         try:
             return fn(*args)
@@ -717,7 +891,7 @@ def collect(cfg, rates):
         "uptime_s": safe(uptime_seconds),
         "gateway": safe(gateway_status, cfg) or {},
         "interfaces": safe(rates.interfaces, cfg) or [],
-        "clients": safe(clients, cfg) or [],
+        "clients": safe(clients, cfg, client_rates, state) or [],
         "vpn": safe(wireguard, cfg) or [],
         "dns": safe(dns_stats, cfg) or {},
         "threats": safe(threats, cfg) or {},
@@ -733,11 +907,12 @@ def main():
 
     with open(args.config, encoding="utf-8") as fh:
         cfg = json.load(fh)
-    rates = Rates()
+    rates, client_rates = Rates(), ClientRates()
     if args.once:
         rates.interfaces(cfg)
+        client_rates.sample(cfg)
         time.sleep(2)
-        print(json.dumps(collect(cfg, rates), indent=2))
+        print(json.dumps(collect(cfg, rates, client_rates), indent=2))
         return
 
     state = State(cfg.get("state_file", "/var/db/fw-agent/state.json"))
@@ -756,7 +931,7 @@ def main():
             next_push = started + interval
             try:
                 pending_events = (pending_events + collect_events(cfg, state))[-1000:]
-                portal.request("POST", "/v1/telemetry", collect(cfg, rates))
+                portal.request("POST", "/v1/telemetry", collect(cfg, rates, client_rates, state))
                 if pending_events:
                     portal.request("POST", "/v1/events", {"events": pending_events})
                     pending_events = []

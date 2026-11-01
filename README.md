@@ -1,18 +1,41 @@
-# OPNsense Gateway Portal + WAF
+# WAF-OPNsense
 
 A self-hosted gateway dashboard and web application security stack for a home lab. Monitor OPNsense connectivity, devices, traffic, DNS, VPNs and security events, with security-key-approved control actions.
 
 The **WAF runs at the edge in Caddy with Coraza and OWASP Core Rule Set**. The FastAPI portal monitors it; installing the portal alone does not protect a website. The supplied edge configuration starts in **DetectionOnly**, which records matches without blocking them. The dashboard does not verify the live engine mode.
 
+![Overview in dark mode](docs/screenshots/overview-dark.png)
+
+| Clients with live speeds | Threats | Light mode |
+| --- | --- | --- |
+| ![Clients](docs/screenshots/clients.png) | ![Threats](docs/screenshots/threats.png) | ![Overview in light mode](docs/screenshots/overview-light.png) |
+
+Screenshots use invented devices and documentation-range addresses.
+
+## Quick start
+
+```sh
+cp deploy/deploy.conf.example deploy/deploy.conf   # domain, box addresses, SSH key
+sh deploy/deploy.sh all                             # PKI, secrets, Pi 4, Pi 5, firewall agent, host firewall, first user
+```
+
+`deploy.sh` runs from your admin PC (Linux, macOS or Git Bash) over SSH and every step can be run again on its own
+(`check`, `pki`, `secrets`, `services`, `edge`, `firewall`, `hostfw`, `user`, `keys`, `status`). It never overwrites
+existing secrets, the firewall's `agent.json` or the portal database, adopts the `.env` files of a box that is already set
+up, and refuses to replace a box's certificates with different ones. The [runbook](docs/RUNBOOK.md) explains each step.
+
 ## Dashboard
 
-- Latency, packet loss, bandwidth and availability graphs with visible UTC time axes and timestamp tooltips; 1-hour, 24-hour, 7-day and 30-day windows.
+- Navigation grouped into Monitor, Network, Security, Control and Admin; clean zinc/black theme with light, dark and system modes.
+- Times shown in your browser's own time zone (PORTAL_TZ is the fallback).
+- Latency, packet loss, bandwidth and availability graphs with timestamp tooltips; 1-hour, 24-hour, 7-day and 30-day windows.
+- Per-device download and upload speed, status badges (allowed, paused, limited, pending) and a Manage menu to pause, resume or speed-limit a device. Each change is signed with your security key and checked by the firewall.
 - Average latency/loss, peak throughput, observed availability and telemetry coverage. Missing observations leave gaps rather than suggesting healthy service.
 - Timestamped network flow snapshot, current clients, recent alerts and outage history.
 - Device search by name, IP, MAC or maker; segment/status filters. Alerts filter by search, source and severity.
-- Seven UTC days of confirmed Coraza events, daily chart and per-site totals. Ordinary HTTP 403 responses are not counted as WAF blocks.
+- Threats: recent WAF events with rule, client and path, top rules/clients/paths, per-site totals, Suricata sources and signatures, and active CrowdSec bans. Ordinary HTTP 403 responses are not counted as WAF blocks.
 - Authenticated JSON metrics and CSV downloads, bounded to 240 aggregate points per window.
-- Live content updates, pause/resume, manual refresh, timeout/error feedback, responsive layout and system light/dark themes. No CDN chart dependencies.
+- Live content updates, pause/resume, manual refresh, timeout/error feedback and a responsive layout with a drawer menu on phones. No CDN dependencies.
 
 ## Security and scope
 
@@ -50,9 +73,19 @@ export PORTAL_DEV=1
 
 Open http://localhost:8000 and sign in with the TOTP setup printed by create-user. Empty graphs are expected until the agent reports; this project does not substitute demo data for live telemetry.
 
+## Where the WAF is configured
+
+WAF policy lives on the edge, not in the portal: the portal only shows what the WAF did, so a compromised portal cannot weaken it.
+
+- **Rules:** the `(waf)` snippet in [deploy/edge/caddy/Caddyfile](deploy/edge/caddy/Caddyfile) loads the OWASP Core Rule Set through Coraza. Add exclusions inside its `directives` block, for example `SecRuleRemoveById 911100` or a narrower `SecRuleUpdateTargetById`.
+- **Mode:** `WAF_MODE` in `deploy/edge/.env` (`DetectionOnly` records, `On` blocks). Give one site its own copy of the snippet with `SecRuleEngine On` to switch sites one at a time.
+- **Apply:** `sh deploy/deploy.sh edge` (or `docker compose up -d` in `deploy/edge` on the Pi 5).
+
+Check the Threats page for false positives before switching to `On`. For example, rule 911100 ("Method is not allowed by policy") fires on PUT requests that apps such as password vaults use, so it needs an exclusion for those sites first.
+
 ## Deployment and configuration
 
-Follow [the runbook](docs/RUNBOOK.md) for the two-host deployment. Copy each Compose directory's `.env.example` to `.env`, replace addresses/domains and generate independent secrets. Keep `.env`, certificates, private keys and databases out of Git.
+`deploy/deploy.sh` does the whole two-host deployment (see Quick start); [the runbook](docs/RUNBOOK.md) covers the same steps by hand. Keep `.env`, `deploy/deploy.conf`, certificates, private keys and databases out of Git.
 
 | Component | Location | Purpose |
 | --- | --- | --- |
@@ -64,7 +97,7 @@ Follow [the runbook](docs/RUNBOOK.md) for the two-host deployment. Copy each Com
 
 Current defaults use Cloudflare-proxied DNS, WAN IPv4 port forwarding to Caddy on 80/443, portal HTTPS on **9443**, agent mTLS on **9444**, and CrowdSec LAPI on **9080**. Cloudflare Tunnel is not deployed by these Compose files.
 
-Important settings include PORTAL_ORIGIN, PORTAL_RP_ID, PORTAL_COOKIE_DOMAIN, PORTAL_TRUSTED_PROXIES, PORTAL_RETENTION_DAYS (90 by default), PORTAL_WAF_SHIP_TOKEN and optional Telegram credentials. Compose supplies the production origin/proxy settings. Agent interface names and gateway names must match your firewall.
+Important settings include PORTAL_ORIGIN, PORTAL_RP_ID, PORTAL_COOKIE_DOMAIN, PORTAL_TRUSTED_PROXIES, PORTAL_RETENTION_DAYS (90 by default), PORTAL_TZ, PORTAL_WAF_SHIP_TOKEN, CROWDSEC_PORTAL_KEY (read-only bouncer key for the bans list) and optional Telegram credentials. Compose supplies the production origin/proxy settings. Agent interface names and gateway names must match your firewall.
 
 ## Validation and contributing
 

@@ -1,9 +1,13 @@
 """Jinja setup and small view helpers (server-rendered SVG charts: no CDN, strict CSP)."""
+import contextvars
 import html
 import json
 import math
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
@@ -11,19 +15,76 @@ from markupsafe import Markup
 from .config import settings
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+# The viewer's zone for the page being rendered; templates render synchronously inside render().
+_tz = contextvars.ContextVar("tz", default=timezone.utc)
 
 NAV = [
-    ("/", "Overview"), ("/clients", "Clients"), ("/traffic", "Traffic"), ("/threats", "Threats"),
-    ("/dns", "DNS"), ("/vpn", "VPN"), ("/alerts", "Alerts"), ("/audit", "Audit"),
+    ("Monitor", [("/", "Overview", "overview"), ("/traffic", "Traffic", "traffic"), ("/dns", "DNS", "dns"), ("/vpn", "VPN", "vpn")]),
+    ("Network", [("/clients", "Clients", "clients")]),
+    ("Security", [("/threats", "Threats", "threats"), ("/alerts", "Alerts", "alerts")]),
+    ("Control", [("/actions", "Actions", "actions")]),
+    ("Admin", [("/audit", "Audit log", "audit"), ("/security", "Account security", "security")]),
 ]
+# 24x24 stroke icons for the drawer.
+NAV_ICONS = {
+    "overview": "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
+    "traffic": "M3 17l6-6 4 4 8-8M15 7h6v6",
+    "dns": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9c-2.4-2.5-3.6-5.5-3.6-9S9.6 5.5 12 3z",
+    "vpn": "M6 11h12v10H6zM8.5 11V7.5a3.5 3.5 0 0 1 7 0V11M12 15v2",
+    "clients": "M4 5h16v10H4zM2 19h20M9 15v4M15 15v4",
+    "threats": "M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6zM9.5 12l2 2 3.5-4",
+    "alerts": "M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 21h4",
+    "actions": "M13 2 4 14h7l-1 8 9-12h-7z",
+    "audit": "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
+    "security": "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 21a7.5 7.5 0 0 1 15 0",
+}
+
+
+def _nav(path: str, is_operator: bool):
+    """Drawer sections for this viewer, plus the (section, label) of the current page."""
+    groups, current = [], None
+    for section, items in NAV:
+        shown = []
+        for href, label, icon in items:
+            if href == "/actions" and not is_operator:
+                continue
+            active = path == href or (href != "/" and path.startswith(href))
+            if active:
+                current = (section, label)
+            shown.append((href, label, NAV_ICONS[icon], active))
+        if shown:
+            groups.append((section, shown))
+    return groups, current
+
+
+def _zone(name: str):
+    if not name or len(name) > 64:
+        return None
+    try:
+        return timezone.utc if name == "UTC" else ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def viewer_tz(request):
+    """The browser's own zone (cookie from portal.js), else PORTAL_TZ, else UTC."""
+    return _zone(unquote(request.cookies.get("tz", ""))) or _zone(settings.default_tz) or timezone.utc
+
+
+def local(ts) -> datetime:
+    return datetime.fromtimestamp(int(ts), _tz.get())
 
 
 def render(request, name: str, status_code: int = 200, **ctx):
+    zone = viewer_tz(request)
+    _tz.set(zone)
+    ctx["tz_name"] = str(zone)
+    ctx["tz_abbr"] = datetime.now(zone).strftime("%Z")
     session = ctx.get("session") or getattr(request.state, "session", None)
     ctx.setdefault("session", session)
     ctx["csrf"] = session.csrf if session else ""
-    ctx["nav"] = NAV + ([("/actions", "Actions")] if session and session.is_operator else [])
     ctx["path"] = request.url.path
+    ctx["nav"], ctx["nav_current"] = _nav(ctx["path"], bool(session and session.is_operator))
     ctx["rp_name"] = settings.rp_name
     # Live requests only need page content. Auth is still enforced by the route.
     ctx["fragment"] = bool(session and ctx.get("refresh") and request.headers.get("X-Auto-Refresh") == "1")
@@ -37,7 +98,7 @@ def render(request, name: str, status_code: int = 200, **ctx):
 def fmt_ts(ts) -> str:
     if not ts:
         return "—"
-    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(ts)))
+    return local(ts).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def fmt_ago(ts) -> str:
@@ -77,7 +138,7 @@ def _number(value) -> str:
 
 
 def time_chart(points, field: str, label: str, unit: str = "", cls: str = "primary", start=None, end=None) -> Markup:
-    """Bounded, accessible SVG with UTC timestamps and gaps for missing observations."""
+    """Bounded, accessible SVG with local timestamps and gaps for missing observations."""
     valid = [(i, p) for i, p in enumerate(points)
              if isinstance(p.get(field), (int, float)) and math.isfinite(p[field])]
     if not valid:
@@ -90,7 +151,7 @@ def time_chart(points, field: str, label: str, unit: str = "", cls: str = "prima
     high = max(1, max(p[field] for _, p in valid))
     esc = html.escape
     color = cls if cls in ("primary", "alt", "warn", "bad") else "primary"
-    title = f"{label} ({unit}). UTC. Gaps indicate missing observations."
+    title = f"{label} ({unit}). Times in {_tz.get()}. Gaps indicate missing observations."
     out = [f'<svg class="time-chart {color}" viewBox="0 0 640 188" role="img" aria-label="{esc(title)}">',
            f'<title>{esc(title)}</title>']
     for fraction in (0, .5, 1):
@@ -108,7 +169,7 @@ def time_chart(points, field: str, label: str, unit: str = "", cls: str = "prima
         x = left + (max(first, p["ts"]) - first) / time_span * (right - left)
         y = bottom - value / high * (bottom - top)
         coords.append(f"{x:.2f},{y:.2f}")
-        stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(p["ts"]))
+        stamp = fmt_ts(p["ts"])
         tooltip = f"{stamp} · {_number(value)} {unit}"
         dots.append(f'<circle class="chart-point" cx="{x:.2f}" cy="{y:.2f}" r="2.5"><title>{esc(tooltip)}</title></circle>')
     if coords:
@@ -120,7 +181,7 @@ def time_chart(points, field: str, label: str, unit: str = "", cls: str = "prima
         stamp = first + time_span * fraction
         fmt = "%d %b %H:%M" if time_span > 86400 else "%H:%M"
         out.append(f'<text class="chart-label" x="{left + fraction * (right - left):.1f}" y="178" text-anchor="{anchor}">'
-                   f'{time.strftime(fmt, time.gmtime(stamp))}</text>')
+                   f'{local(stamp).strftime(fmt)}</text>')
     out.append('</svg>')
     return Markup("".join(out))
 

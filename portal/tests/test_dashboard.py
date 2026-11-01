@@ -1,5 +1,7 @@
 """Metrics correctness, bounded reads, dashboard filters, and export guards."""
 import csv
+import dataclasses
+import json
 import hashlib
 import io
 import secrets
@@ -16,7 +18,7 @@ from app.main import app
 @pytest.fixture(autouse=True)
 def clean_telemetry():
     db.init()
-    for table in ("samples", "snapshots", "clients", "events", "outages", "waf_hits", "kv"):
+    for table in ("samples", "snapshots", "clients", "events", "outages", "waf_hits", "waf_events", "kv"):
         db.run(f"DELETE FROM {table}")
     yield
 
@@ -231,3 +233,82 @@ def test_chart_has_utc_times_and_breaks_across_missing_data():
     assert 'class="chart-label"' in chart
     bar = str(uptime_bar([(0.5, "up"), (0.5, "nodata")], 1700000000, 1700000240))
     assert "UTC" in bar and "No WAN observation" in bar
+
+
+CORAZA_RECORD = {
+    "transaction": {
+        "unix_timestamp": 1793526059116990993, "client_ip": "203.0.113.9", "server_id": "vault.example.com",
+        "request": {"method": "PUT", "uri": "/api/ciphers/abc?token=secret", "headers": None},
+        "producer": {"rule_engine": "DetectionOnly"}, "is_interrupted": False,
+    },
+    "messages": [
+        {"error_message": '[client "203.0.113.9"] Coraza: Warning. Method is not allowed by policy '
+                          '[file "x"] [id "911100"] [msg "Method is not allowed by policy"] [severity "CRITICAL"]'},
+        {"error_message": '[id "949110"] [msg "Inbound Anomaly Score Exceeded"]'},
+    ],
+}
+
+
+def test_coraza_detail_keeps_rule_and_client_but_drops_query():
+    from app import waflog
+    e = waflog.coraza_detail(json.dumps(CORAZA_RECORD))
+    assert e["client_ip"] == "203.0.113.9" and e["host"] == "vault.example.com"
+    assert e["path"] == "/api/ciphers/abc" and "secret" not in json.dumps(e)
+    assert [r["id"] for r in e["rules"]] == ["911100"]  # anomaly-score bookkeeping left out
+    assert e["engine"] == "DetectionOnly" and e["blocked"] is False and e["ts"] == 1793526059
+
+
+def test_shipped_waf_events_show_on_threats_page(client):
+    from app import waflog
+    event = waflog.coraza_detail(json.dumps(CORAZA_RECORD))
+    event["ts"] = db.now()
+    body = {"batch_id": "events-batch-0000001", "hits": [], "events": [event, {"bad": 1}, "junk"]}
+    with TestClient(app, base_url="http://testserver", client=("10.99.0.1", 5000)) as proxy:
+        assert proxy.post("/internal/waf-hits", json=body, headers={"Authorization": "Bearer shiptoken"}).json()["ok"]
+        too_many = {"batch_id": "events-batch-0000002", "hits": [], "events": [event] * 501}
+        assert proxy.post("/internal/waf-hits", json=too_many, headers={"Authorization": "Bearer shiptoken"}).status_code == 400
+    assert db.one("SELECT COUNT(*) AS n FROM waf_events")["n"] == 1
+    sign_in(client)
+    page = client.get("/threats").text
+    assert "911100" in page and "203.0.113.9" in page and "/api/ciphers/abc" in page
+    assert "WAF mode: DetectionOnly" in page
+
+
+def test_ids_alerts_show_source_target_and_category(client):
+    detail = {"src_ip": "198.51.100.7", "src_port": 4444, "dest_port": 443, "proto": "TCP",
+              "category": "Detection of a Network Scan", "signature_id": 2029054, "in_iface": "igc0"}
+    db.run("INSERT INTO events(ts,source,severity,title,detail) VALUES (?, 'suricata', 'warning', ?, ?)",
+           db.now(), "ET SCAN Zmap User-Agent (Inbound) 198.51.100.7 -> 192.0.2.1:443", json.dumps(detail))
+    sign_in(client)
+    page = client.get("/threats").text
+    assert "198.51.100.7:4444" in page and "Detection of a Network Scan" in page and "sid 2029054" in page
+    assert "ET SCAN Zmap User-Agent (Inbound)</td>" in page  # grouped signature without the addresses
+
+
+def test_times_follow_the_browser_time_zone_cookie(client):
+    sign_in(client)
+    db.run("INSERT INTO events(ts,source,severity,title) VALUES (1793526059, 'gateway', 'warning', 'x')")
+    client.cookies.set("tz", "Asia/Kolkata")
+    page = client.get("/alerts?show=all").text
+    assert "2026-11-01 15:10 IST" in page and "Asia/Kolkata" in page
+    client.cookies.set("tz", "Asia%2FCalcutta")  # as browsers send it from portal.js
+    assert "2026-11-01 15:10 IST" in client.get("/alerts?show=all").text
+    client.cookies.set("tz", "../../etc/passwd")  # not a zone: falls back to PORTAL_TZ (UTC in tests)
+    page = client.get("/alerts?show=all").text
+    assert "2026-11-01 09:40 UTC" in page
+
+
+def test_crowdsec_bans_listed_without_blocklist_noise(client, monkeypatch):
+    from app import crowdsec
+    monkeypatch.setattr(crowdsec, "settings", dataclasses.replace(settings, crowdsec_lapi="http://lapi", crowdsec_key="k"))
+    monkeypatch.setitem(crowdsec._cache, "data", None)
+    monkeypatch.setattr(crowdsec, "_fetch", lambda: [
+        {"origin": "crowdsec", "scenario": "crowdsecurity/http-probing", "value": "192.0.2.50", "scope": "Ip",
+         "type": "ban", "duration": "3h59m12.5s"},
+        *({"origin": "lists", "scenario": "firehol", "value": f"10.0.0.{i}"} for i in range(5)),
+    ])
+    sign_in(client)
+    page = client.get("/threats").text
+    assert "192.0.2.50" in page and "crowdsecurity/http-probing" in page and "3h 59m" in page
+    assert "10.0.0.1" not in page and "lists: 5" in page
+    assert crowdsec._seconds("1h2m3s") == 3723

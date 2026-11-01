@@ -42,7 +42,8 @@ def test_collectors(monkeypatch, tmp_path):
 
     clients = {c["mac"]: c for c in fw_agent.clients(cfg)}
     assert clients["00:11:22:33:44:55"] == {"mac": "00:11:22:33:44:55", "ip": "10.10.0.20", "hostname": "desktop",
-                                             "segment": "LAN", "online": True, "idle_s": 100}
+                                             "segment": "LAN", "online": True, "idle_s": 100,
+                                             "down_bps": None, "up_bps": None, "paused": False}
     assert not clients["66:77:88:99:aa:bb"]["online"]            # lease only
     assert "00:0d:b9:00:00:01" not in clients                    # firewall's own (permanent) entry
     assert "00:aa:bb:cc:dd:ee" not in clients                    # WAN upstream router
@@ -68,3 +69,28 @@ def test_tail_starts_at_end_and_follows_rotation(tmp_path):
     assert events and events[0]["severity"] == "critical" and "ET SCAN x" in events[0]["title"]
     log.write_text('{"event_type":"dns"}\n')                     # truncated / rotated
     assert len(fw_agent.tail_new_lines(state, str(log))) == 1
+
+
+PF_STATES = """all tcp 17.0.0.6:443 <- 192.168.20.180:50009       ESTABLISHED:ESTABLISHED
+   [4129411934 + 4194240] wscale 7  [2135960825 + 31872] wscale 6
+   age 21:56:56, expires in 23:54:38, 318:287 pkts, {a}:{b} bytes, rule 116
+   id: a607e66a00000000 creatorid: 206641bb
+   origif: igb1
+all tcp 198.51.100.20:46616 (192.168.20.180:50009) -> 17.0.0.6:443       ESTABLISHED:ESTABLISHED
+   age 21:56:56, expires in 23:54:38, 318:287 pkts, {a}:{b} bytes, rule 106
+   id: a707e66a00000000 creatorid: 206641bb route-to: 198.51.100.1@igb0
+   origif: igb0
+"""
+
+
+def test_client_rates_from_pf_states(monkeypatch):
+    cfg = {"segments": {"igb0": "WAN", "igb1": "LAN"}}
+    counters = iter([(1000, 50000), (3000, 1050000)])
+    monkeypatch.setattr(fw_agent, "run", lambda cmd, **kw: (0, PF_STATES.format(**dict(zip("ab", next(counters)))), ""))
+    clock = iter([100.0, 110.0])
+    monkeypatch.setattr(fw_agent.time, "monotonic", lambda: next(clock))
+    rates = fw_agent.ClientRates()
+    assert rates.sample(cfg) == {}                         # first poll only sets the baseline
+    speeds = rates.sample(cfg)
+    # 1 MB down and 2 kB up in 10 s; the WAN (NAT) copy of the same state is not counted again.
+    assert speeds["192.168.20.180"] == (800000, 1600)

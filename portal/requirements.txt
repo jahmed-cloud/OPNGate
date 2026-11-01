@@ -6,3 +6,4 @@ webauthn==3.0.1
 pyotp==2.10.0
 argon2-cffi==25.1.0
 cryptography==50.0.2
+tzdata==2026.6

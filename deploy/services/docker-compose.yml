@@ -41,6 +41,8 @@ services:
       PORTAL_COOKIE_DOMAIN: ${DOMAIN}
       # Docker's port publishing keeps the real source IP, so this is the Pi 5's address.
       PORTAL_TRUSTED_PROXIES: ${EDGE_HOST_IP:?set EDGE_HOST_IP}/32
+      PORTAL_CROWDSEC_LAPI: http://crowdsec:8080
+      PORTAL_CROWDSEC_KEY: ${CROWDSEC_PORTAL_KEY}
     command: >
       uvicorn app.main:app --host 0.0.0.0 --port 9443 --no-proxy-headers
       --ssl-certfile /pki/services.crt --ssl-keyfile /pki/services.key
@@ -66,6 +68,8 @@ services:
       COLLECTIONS: crowdsecurity/linux
       BOUNCER_KEY_caddy: ${CROWDSEC_CADDY_KEY:?set CROWDSEC_CADDY_KEY}
       BOUNCER_KEY_opnsense: ${CROWDSEC_OPNSENSE_KEY:?set CROWDSEC_OPNSENSE_KEY}
+      # Read-only: lets the portal list active bans on the Threats page.
+      BOUNCER_KEY_portal: ${CROWDSEC_PORTAL_KEY:?set CROWDSEC_PORTAL_KEY}
     volumes:
       - crowdsec-db:/var/lib/crowdsec/data
       - crowdsec-config:/etc/crowdsec

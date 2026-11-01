@@ -33,6 +33,8 @@ ACTION_LABELS = {
     "wg_disconnect": "Disconnect a WireGuard peer",
     "pause_client": "Pause a client",
     "resume_client": "Resume a client",
+    "limit_client": "Limit a client's speed",
+    "unlimit_client": "Remove a client's speed limit",
     "breakglass": "Enable / disable BREAKGLASS",
     "backup_config": "Run encrypted config backup",
 }
@@ -72,6 +74,16 @@ def _mac(value: str) -> str:
     return mac
 
 
+def _mbps(value, name: str) -> float:
+    try:
+        mbps = round(float(value), 1)
+    except (TypeError, ValueError) as exc:
+        raise InvalidAction(f"{name} must be a number of Mbit/s") from exc
+    if not 0.1 <= mbps <= 1000:
+        raise InvalidAction(f"{name} must be 0.1-1000 Mbit/s")
+    return mbps
+
+
 def validate(kind: str, raw: dict) -> dict:
     """Normalise parameters. The agent re-validates with its own copy of these rules."""
     if kind == "block_ip":
@@ -87,6 +99,12 @@ def validate(kind: str, raw: dict) -> dict:
         return {"mac": _mac(raw.get("mac", "")), "minutes": _minutes(raw.get("minutes", 0), allow_zero=True)}
     if kind == "resume_client":
         return {"mac": _mac(raw.get("mac", ""))}
+    if kind == "limit_client":
+        return {"mac": _mac(raw.get("mac", "")), "down_mbps": _mbps(raw.get("down_mbps"), "Download"),
+                "up_mbps": _mbps(raw.get("up_mbps"), "Upload"),
+                "minutes": _minutes(raw.get("minutes", 0), allow_zero=True)}
+    if kind == "unlimit_client":
+        return {"mac": _mac(raw.get("mac", ""))}
     if kind == "breakglass":
         return {"enable": str(raw.get("enable", "")).lower() in ("1", "true", "on", "yes")}
     if kind == "backup_config":
@@ -99,6 +117,8 @@ def reverse_of(kind: str, params: dict):
     next WireGuard reload; a backup has nothing to undo)."""
     if kind == "pause_client":
         return "resume_client", {"mac": params["mac"]}
+    if kind == "limit_client":
+        return "unlimit_client", {"mac": params["mac"]}
     if kind == "block_ip":
         return "unblock_ip", {"cidr": params["cidr"]}
     if kind == "breakglass":
@@ -107,7 +127,8 @@ def reverse_of(kind: str, params: dict):
 
 
 def active_effects() -> dict:
-    """Finished pause/block actions still in force (not expired, not undone since), keyed by action id."""
+    """Finished pause/limit/block actions still in force (not expired, not undone since), keyed by action id.
+    Keys: ("mac", mac) for pauses, ("limit", mac) for speed limits, ("cidr", cidr) for blocks."""
     now = db.now()
     active, undone = {}, set()
     # rowid breaks ties: an undo created in the same second must still count as newer.
@@ -115,10 +136,13 @@ def active_effects() -> dict:
         params = json.loads(row["params"])
         if row["type"] == "resume_client":
             undone.add(("mac", params.get("mac")))
+        elif row["type"] == "unlimit_client":
+            undone.add(("limit", params.get("mac")))
         elif row["type"] == "unblock_ip":
             undone.add(("cidr", params.get("cidr")))
-        elif row["type"] in ("pause_client", "block_ip"):
-            key = ("mac", params.get("mac")) if row["type"] == "pause_client" else ("cidr", params.get("cidr"))
+        elif row["type"] in ("pause_client", "limit_client", "block_ip"):
+            key = {"pause_client": ("mac", params.get("mac")), "limit_client": ("limit", params.get("mac")),
+                   "block_ip": ("cidr", params.get("cidr"))}[row["type"]]
             minutes = params.get("minutes") or 0
             expired = minutes and (row["finished_at"] or row["created_at"]) + minutes * 60 < now
             if key not in undone and not expired:
@@ -198,10 +222,11 @@ def _get(action_id: str):
 def action_detail(action_id: str, request: Request, session: Session = Depends(require_operator)):
     row = _get(action_id)
     undo = reverse_of(row["type"], json.loads(row["params"])) if row["status"] == "done" else None
-    if undo and row["type"] in ("pause_client", "block_ip") and action_id not in active_effects():
+    if undo and row["type"] in ("pause_client", "limit_client", "block_ip") and action_id not in active_effects():
         undo = None  # already expired or undone
     return render(request, "action_detail.html", session=session, a=row, labels=ACTION_LABELS,
-                  payload=json.dumps(json.loads(row["payload"]), indent=2), undo=undo)
+                  payload=json.dumps(json.loads(row["payload"]), indent=2), undo=undo,
+                  refresh=5 if row["status"] in ("approved", "fetched") else None)
 
 
 @router.post("/actions/{action_id}/undo")

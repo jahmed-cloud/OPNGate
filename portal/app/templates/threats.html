@@ -1,38 +1,107 @@
 {% extends "base.html" %}
+{% block title %}Threats · {{ rp_name }}{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Threats</h1><span class="muted">firewall data updated {{ updated | ago }}</span></div>
-<p class="banner warn">WAF deployment and engine mode are unverified. Coraza must run at the edge; DetectionOnly records matches without blocking. Shipper contact: {{ waf_last_seen | ts }} UTC.</p>
-{% if legacy_waf_count %}<p class="muted">{{ legacy_waf_count }} legacy counts excluded: older counters could include application and authentication errors.</p>{% endif %}
-<section class="card"><h2>Confirmed WAF events · seven UTC days</h2><p class="muted small">{{ waf_days[0].day }} 00:00 UTC through today {{ now | ts }}. Current day is partial.</p>{{ waf_chart(waf_days) }}<p class="muted">{{ waf_totals.blocked }} interrupted transactions · {{ waf_totals.detected }} non-interrupted rule matches. Missing logs cannot be distinguished from zero events.</p></section>
+<div class="page-head">
+  <div><p class="eyebrow">Security</p><h1>Threats</h1><p class="page-description">Web firewall, intrusion detection and bans. Firewall data updated {{ updated | ago }}.</p></div>
+</div>
+
+{% if waf_engine == 'On' %}
+<p class="banner ok"><strong>WAF is blocking.</strong> Latest audit record ({{ waf_engine_ts | ts }}) shows the rule engine in On mode.</p>
+{% elif waf_engine %}
+<p class="banner warn"><strong>WAF mode: {{ waf_engine }}.</strong> Matches are recorded but not blocked (latest audit record {{ waf_engine_ts | ts }}). Shipper contact {{ waf_last_seen | ts }}.</p>
+{% else %}
+<p class="banner warn">WAF mode not yet reported. It appears after the next audit record from the edge. Shipper contact {{ waf_last_seen | ts }}.</p>
+{% endif %}
 
 <div class="tiles">
+  <div class="tile"><span class="label">WAF matches · 7 days</span><span class="value">{{ waf_totals.detected + waf_totals.blocked }}</span><span class="sub">{{ waf_totals.blocked }} blocked · {{ waf_totals.detected }} detected</span></div>
+  <div class="tile"><span class="label">IDS alerts · 24 h</span><span class="value">{{ ids_count }}</span><span class="sub">Suricata on the firewall</span></div>
+  {% if bans and not bans.error %}
+  <div class="tile"><span class="label">CrowdSec bans</span><span class="value">{{ bans.local }}</span><span class="sub">raised here · {{ bans.total }} incl. blocklists</span></div>
+  {% endif %}
   {% for name, count in (data.tables or {}).items() %}
   <div class="tile"><span class="label">{{ name }}</span><span class="value">{{ count }}</span><span class="sub">pf table entries</span></div>
   {% endfor %}
-  <div class="tile"><span class="label">CrowdSec bans</span><span class="value">{{ (data.crowdsec or {}).active_bans or 0 }}</span><span class="sub">active decisions</span></div>
-  <div class="tile"><span class="label">IDS alerts 24 h</span><span class="value">{{ ids_count }}</span><span class="sub">Suricata · latest 100 shown</span></div>
 </div>
+
+<section class="card"><div class="card-head"><h2>WAF events by day</h2><span class="chart-unit">UTC days</span></div>
+  <p class="muted small">{{ waf_days[0].day }} through today; the current day is partial.</p>
+  {{ waf_chart(waf_days) }}
+  {% if legacy_waf_count %}<p class="small muted">{{ legacy_waf_count }} older counts excluded: they could include application and login errors.</p>{% endif %}
+</section>
 
 <div class="grid2">
-  <section class="card"><h2>Banned attackers by country</h2>
-    <table><tbody>{% for cc, n in by_country %}<tr><td>{{ cc or '??' }}</td><td class="num">{{ n }}</td></tr>
-    {% else %}<tr><td class="muted">No data.</td></tr>{% endfor %}</tbody></table></section>
-  <section class="card"><h2>Bans by scenario</h2>
-    <table><tbody>{% for s, n in by_scenario %}<tr><td class="mono">{{ s }}</td><td class="num">{{ n }}</td></tr>
-    {% else %}<tr><td class="muted">No data.</td></tr>{% endfor %}</tbody></table></section>
+  <section class="card"><div class="card-head"><h2>Top WAF rules</h2><span class="chart-unit">7 days</span></div>
+    <table><thead><tr><th>Rule</th><th>Description</th><th class="num">Hits</th></tr></thead><tbody>
+    {% for rule_id, msg, n in waf_rules %}<tr><td class="mono">{{ rule_id }}</td><td>{{ msg or '—' }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">No rule details yet. They appear as new audit records arrive.</td></tr>{% endfor %}
+    </tbody></table></section>
+  <section class="card"><div class="card-head"><h2>Top WAF clients</h2><span class="chart-unit">7 days</span></div>
+    <table><thead><tr><th>Client IP</th><th class="num">Events</th></tr></thead><tbody>
+    {% for ip, n in waf_clients %}<tr><td class="mono">{{ ip }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td colspan="2" class="muted">None yet.</td></tr>{% endfor %}
+    </tbody></table>
+    <h3 class="small muted">Most-hit paths</h3>
+    <table><tbody>
+    {% for key, n in waf_paths %}<tr><td class="mono small">{{ key[0] }}{{ key[1] }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td class="muted">None yet.</td></tr>{% endfor %}
+    </tbody></table></section>
 </div>
 
-<section class="card"><h2>WAF hits per site, 7 days</h2>
-  <table><thead><tr><th>Site</th><th>Detected</th><th>Blocked</th></tr></thead><tbody>
-  {% for host, k in waf_hosts.items() %}<tr><td class="mono">{{ host }}</td><td class="num">{{ k.detected }}</td><td class="num">{{ k.blocked }}</td></tr>
-  {% else %}<tr><td colspan="3" class="muted">No WAF hits recorded.</td></tr>{% endfor %}
+<section class="card scroll"><div class="card-head"><h2>Recent WAF events</h2><span class="chart-unit">latest 50 · {{ tz_abbr }}</span></div>
+  <table><thead><tr><th>Time</th><th>Site</th><th>Client</th><th>Request</th><th>Rules</th><th>Outcome</th></tr></thead><tbody>
+  {% for e in waf_recent %}<tr>
+    <td>{{ e.ts | ts }}</td><td class="mono small">{{ e.host }}</td><td class="mono">{{ e.client_ip or '—' }}</td>
+    <td class="mono small">{{ e.method }} {{ e.path }}</td>
+    <td class="small">{% for r in e.rules %}<span class="mono">{{ r.id }}</span> {{ r.msg }}{% if r.severity %} <span class="muted">({{ r.severity | lower }})</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+    <td>{% if e.blocked %}<span class="sev critical">blocked</span>{% else %}<span class="sev warning">detected</span>{% endif %}</td>
+  </tr>{% else %}<tr><td colspan="6" class="muted">No WAF events with details yet.</td></tr>{% endfor %}
   </tbody></table>
 </section>
 
-<section class="card scroll"><h2>IDS alerts, 24 hours</h2>
-  <table><thead><tr><th>Time</th><th>Severity</th><th>Alert</th></tr></thead><tbody>
-  {% for e in ids %}<tr><td>{{ e.ts | ts }}</td><td><span class="sev {{ e.severity }}">{{ e.severity }}</span></td><td>{{ e.title }}</td></tr>
-  {% else %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
+<section class="card"><div class="card-head"><h2>WAF matches per site</h2><span class="chart-unit">7 days</span></div>
+  <table><thead><tr><th>Site</th><th class="num">Detected</th><th class="num">Blocked</th></tr></thead><tbody>
+  {% for host, k in waf_hosts.items() %}<tr><td class="mono">{{ host }}</td><td class="num">{{ k.detected }}</td><td class="num">{{ k.blocked }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No WAF matches recorded.</td></tr>{% endfor %}
   </tbody></table>
+</section>
+
+<div class="grid2">
+  <section class="card"><div class="card-head"><h2>Top IDS sources</h2><span class="chart-unit">24 h</span></div>
+    <table><thead><tr><th>Source IP</th><th class="num">Alerts</th></tr></thead><tbody>
+    {% for ip, n in ids_sources %}<tr><td class="mono">{{ ip }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td colspan="2" class="muted">None.</td></tr>{% endfor %}
+    </tbody></table></section>
+  <section class="card"><div class="card-head"><h2>Top IDS signatures</h2><span class="chart-unit">24 h</span></div>
+    <table><thead><tr><th>Signature</th><th class="num">Alerts</th></tr></thead><tbody>
+    {% for sig, n in ids_signatures %}<tr><td>{{ sig }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td colspan="2" class="muted">None.</td></tr>{% endfor %}
+    </tbody></table></section>
+</div>
+
+<section class="card scroll"><div class="card-head"><h2>IDS alerts</h2><span class="chart-unit">24 h · latest 100 · {{ tz_abbr }}</span></div>
+  <table><thead><tr><th>Time</th><th>Severity</th><th>Signature</th><th>Source</th><th>Target</th><th>Category</th></tr></thead><tbody>
+  {% for e in ids %}<tr>
+    <td>{{ e.ts | ts }}</td><td><span class="sev {{ e.severity }}">{{ e.severity }}</span></td>
+    <td>{{ e.signature }}{% if e.sid %} <span class="muted small mono">sid {{ e.sid }}</span>{% endif %}</td>
+    <td class="mono">{{ e.src }}</td><td class="mono">{{ e.proto or '' }} {{ e.dest_port or '' }}{% if e.iface %} <span class="muted small">{{ e.iface }}</span>{% endif %}</td>
+    <td class="small">{{ e.category or '—' }}</td>
+  </tr>{% else %}<tr><td colspan="6" class="muted">None.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+
+<section class="card scroll"><div class="card-head"><h2>CrowdSec bans</h2><span class="chart-unit">active now</span></div>
+  {% if bans is none %}
+  <p class="muted">Not connected. Set PORTAL_CROWDSEC_LAPI and PORTAL_CROWDSEC_KEY to list active bans here.</p>
+  {% elif bans.error %}
+  <p class="muted">{{ bans.error }}. Bans are still enforced at the edge and firewall.</p>
+  {% else %}
+  <p class="small muted">{% for origin, n in bans.by_origin %}{{ origin }}: {{ n }}{% if not loop.last %} · {% endif %}{% else %}No active decisions.{% endfor %}</p>
+  <table><thead><tr><th>Address</th><th>Scenario</th><th>Action</th><th>Time left</th></tr></thead><tbody>
+  {% for b in bans.recent %}<tr><td class="mono">{{ b.value }}{% if b.scope and b.scope|lower != 'ip' %} <span class="muted small">{{ b.scope }}</span>{% endif %}</td>
+    <td class="mono small">{{ b.scenario }}</td><td>{{ b.type }}</td><td>{{ b.left_s | duration }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">No bans raised by this network right now.</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
 </section>
 {% endblock %}

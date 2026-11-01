@@ -13,8 +13,8 @@
   <div class="tile"><span class="label">Bucket coverage</span><span class="value">{{ '%.1f' % s.coverage_pct }}<small>%</small></span><span class="sub">{{ s.sample_count }} samples in {{ s.occupied_buckets }} buckets</span></div>
 </div>
 <div class="grid2 chart-grid-layout">
-  <section class="card"><div class="card-head"><h2>WAN download</h2><span class="chart-unit">bit/s · UTC</span></div>{{ time_chart(metrics.points, 'rx_bps', 'WAN download', 'bit/s', start=metrics.start, end=metrics.end) }}</section>
-  <section class="card"><div class="card-head"><h2>WAN upload</h2><span class="chart-unit">bit/s · UTC</span></div>{{ time_chart(metrics.points, 'tx_bps', 'WAN upload', 'bit/s', cls='alt', start=metrics.start, end=metrics.end) }}</section>
+  <section class="card"><div class="card-head"><h2>WAN download</h2><span class="chart-unit">bit/s · {{ tz_abbr }}</span></div>{{ time_chart(metrics.points, 'rx_bps', 'WAN download', 'bit/s', start=metrics.start, end=metrics.end) }}</section>
+  <section class="card"><div class="card-head"><h2>WAN upload</h2><span class="chart-unit">bit/s · {{ tz_abbr }}</span></div>{{ time_chart(metrics.points, 'tx_bps', 'WAN upload', 'bit/s', cls='alt', start=metrics.start, end=metrics.end) }}</section>
 </div>
 <p class="chart-note">{{ metrics.bucket_seconds }}-second averages; missing telemetry leaves gaps. Hover a point for time and rate. Export includes the same bucketed observations.</p>
 <section class="card scroll">

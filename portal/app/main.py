@@ -107,7 +107,12 @@ async def waf_hits(request: Request):
         except (KeyError, ValueError, TypeError):
             return JSONResponse({"error": "invalid hit"}, status_code=400)
         hits[(day, str(h.get("host") or "?")[:120], kind)] += count
+    events = body.get("events") or []
+    if not isinstance(events, list) or len(events) > 500:
+        return JSONResponse({"error": "expected at most 500 events"}, status_code=400)
     stored = await run_in_threadpool(waflog.store, hits, batch_id, True)
+    if stored:
+        await run_in_threadpool(waflog.store_events, events)
     return {"ok": True, "stored": len(hits) if stored else 0, "duplicate": not stored}
 
 

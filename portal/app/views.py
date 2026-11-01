@@ -1,14 +1,16 @@
 """Authenticated dashboards and bounded telemetry exports."""
 import csv
 import io
-from collections import defaultdict
+import json
+import re
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from . import actions, db, metrics
+from . import actions, crowdsec, db, metrics
 from .config import settings
 from .security import Session, audit, check_csrf, require_user
 from .templating import render
@@ -121,9 +123,23 @@ def clients(request: Request, session: Session = Depends(require_user)):
         args += [_like(term)] * 4
     rows = db.q(sql + " ORDER BY online DESC, segment, hostname, ip LIMIT 501", *args)
     segments = [r["segment"] for r in db.q("SELECT DISTINCT segment FROM clients WHERE segment IS NOT NULL ORDER BY segment")]
-    return render(request, "clients.html", session=session, rows=rows[:500], segments=segments, segment=segment,
-                  show=show, q=term, limited=len(rows) > 500, now=db.now(), refresh=30,
-                  paused={key[1]: aid for aid, key in actions.active_effects().items() if key[0] == "mac"})
+    effects = actions.active_effects()
+    pending = {}
+    for row in db.q("SELECT id, type, params FROM actions WHERE status IN ('pending_approval','approved','fetched') "
+                    "AND type IN ('pause_client','resume_client','limit_client','unlimit_client') AND expires_at >= ?",
+                    db.now()):
+        pending.setdefault(_json(row["params"]).get("mac"), (row["id"], row["type"]))
+    clients_out = []
+    for row in rows[:500]:
+        c = dict(row)
+        c["limit"] = _json(c.get("speed_limit")) or None
+        clients_out.append(c)
+    return render(request, "clients.html", session=session, rows=clients_out, segments=segments, segment=segment,
+                  show=show, q=term, limited=len(rows) > 500, now=db.now(), refresh=15, pending=pending,
+                  labels_short={"pause_client": "Pause waiting", "resume_client": "Resume waiting",
+                                "limit_client": "Limit waiting", "unlimit_client": "Unlimit waiting"},
+                  paused={key[1]: aid for aid, key in effects.items() if key[0] == "mac"},
+                  limits={key[1]: aid for aid, key in effects.items() if key[0] == "limit"})
 
 
 @router.get("/traffic")
@@ -138,13 +154,63 @@ def traffic(request: Request, session: Session = Depends(require_user)):
     )
 
 
+_IDS_TAIL = re.compile(r"\s+\S+\s+->\s+\S+$")
+
+
+def _json(value) -> dict:
+    try:
+        data = json.loads(value) if value else {}
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _ids_details(since: int) -> tuple:
+    """Suricata alerts with source, target and category pulled out of the stored eve record."""
+    rows, sources, signatures = [], Counter(), Counter()
+    for e in db.q("SELECT ts, severity, title, detail FROM events WHERE source='suricata' AND ts >= ? "
+                  "ORDER BY ts DESC LIMIT 5000", since):
+        d = _json(e["detail"])
+        signature = _IDS_TAIL.sub("", e["title"])
+        sources[d.get("src_ip") or "?"] += 1
+        signatures[signature] += 1
+        if len(rows) < 100:
+            rows.append({"ts": e["ts"], "severity": e["severity"], "signature": signature,
+                         "src": f'{d.get("src_ip", "?")}:{d.get("src_port", "")}'.rstrip(":"),
+                         "dest_port": d.get("dest_port"), "proto": d.get("proto"),
+                         "category": d.get("category"), "sid": d.get("signature_id"), "iface": d.get("in_iface")})
+    return rows, sources.most_common(10), signatures.most_common(10)
+
+
+def _waf_details(since: int) -> tuple:
+    """Recent WAF events plus the rules, clients and paths that trip it most."""
+    recent, rules, clients, paths = [], Counter(), Counter(), Counter()
+    names = {}
+    for e in db.q("SELECT * FROM waf_events WHERE ts >= ? ORDER BY ts DESC LIMIT 5000", since):
+        try:
+            matched = json.loads(e["rules"] or "[]")
+        except ValueError:
+            matched = []
+        for r in matched:
+            rules[r.get("id", "?")] += 1
+            names.setdefault(r.get("id", "?"), r.get("msg") or "")
+        clients[e["client_ip"] or "?"] += 1
+        paths[(e["host"], e["path"] or "/")] += 1
+        if len(recent) < 50:
+            recent.append({**dict(e), "rules": matched})
+    top_rules = [(rule_id, names.get(rule_id, ""), n) for rule_id, n in rules.most_common(10)]
+    return recent, top_rules, clients.most_common(10), paths.most_common(10)
+
+
 @router.get("/threats")
 def threats(request: Request, session: Session = Depends(require_user)):
     ts, data = db.get_snapshot("threats", {})
     now = db.now()
     since = now - 86400
-    ids = db.q("SELECT * FROM events WHERE source='suricata' AND ts >= ? ORDER BY ts DESC LIMIT 100", since)
+    ids, ids_sources, ids_signatures = _ids_details(since)
     ids_count = db.one("SELECT COUNT(*) AS n FROM events WHERE source='suricata' AND ts >= ?", since)["n"]
+    waf_recent, waf_rules, waf_clients, waf_paths = _waf_details(now - 7 * 86400)
+    engine, _, engine_ts = (db.kv_get("waf_engine") or "").partition("|")
     today = datetime.fromtimestamp(now, timezone.utc).date()
     start = today - timedelta(days=6)
     args = (start.isoformat(), today.isoformat())
@@ -174,6 +240,9 @@ def threats(request: Request, session: Session = Depends(require_user)):
     by_scenario = sorted((data.get("crowdsec") or {}).get("by_scenario", {}).items(), key=lambda kv: -kv[1])[:20]
     return render(
         request, "threats.html", session=session, data=data, updated=ts, ids=ids, ids_count=ids_count,
+        ids_sources=ids_sources, ids_signatures=ids_signatures, waf_recent=waf_recent, waf_rules=waf_rules,
+        waf_clients=waf_clients, waf_paths=waf_paths, waf_engine=engine,
+        waf_engine_ts=int(engine_ts) if engine_ts.isdigit() else 0, bans=crowdsec.decisions(),
         waf_hosts=waf_hosts, waf_days=waf_days, waf_totals=totals, legacy_waf_count=legacy,
         waf_last_seen=int(db.kv_get("waf_last_seen", "0")),
         waf_audit_available=db.kv_get("waf_audit_available", "unknown"), now=now,

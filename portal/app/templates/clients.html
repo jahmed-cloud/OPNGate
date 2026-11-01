@@ -1,43 +1,89 @@
 {% extends "base.html" %}
+{% block title %}Clients · {{ rp_name }}{% endblock %}
+{% macro icon(name) -%}
+<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+{%- if name == 'paused' %}<circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/>
+{%- elif name == 'limited' %}<path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4-5"/>
+{%- elif name == 'pending' %}<path d="M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9"/>
+{%- else %}<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>{% endif -%}
+</svg>
+{%- endmacro %}
 {% block content %}
 <div class="page-head">
-  <h1>Clients <span class="muted">{{ rows | length }}</span></h1>
+  <div><p class="eyebrow">Devices</p><h1>Clients <span class="muted">{{ rows | length }}</span></h1>
+    <p class="page-description">Live speed per device. Pausing or limiting a device is signed with your security key and checked by the firewall.</p></div>
   <form class="filters" method="get">
     <input name="q" value="{{ q }}" placeholder="Name, IP, MAC or maker" aria-label="Search clients" maxlength="200">
-    <select name="segment"><option value="">All segments</option>
+    <select name="segment" aria-label="Segment"><option value="">All segments</option>
       {% for s in segments %}<option {{ 'selected' if s == segment }}>{{ s }}</option>{% endfor %}</select>
-    <select name="show"><option value="online" {{ 'selected' if show == 'online' }}>Online now</option>
+    <select name="show" aria-label="Which devices"><option value="online" {{ 'selected' if show == 'online' }}>Online now</option>
       <option value="all" {{ 'selected' if show == 'all' }}>All ever seen</option></select>
     <button>Filter</button>
   </form>
 </div>
 {% if limited %}<p class="banner warn">Showing the first 500 matching devices. Narrow your search or segment.</p>{% endif %}
 <section class="card scroll">
-<table>
-  <thead><tr><th></th><th>Name</th><th>IP</th><th>MAC</th><th>Maker</th><th>Segment</th><th>First seen</th><th>Last active</th>{% if session.is_operator %}<th></th>{% endif %}</tr></thead>
+<table class="clients">
+  <thead><tr><th>Device</th><th>Address</th><th>Segment</th><th class="num">Download</th><th class="num">Upload</th><th>Status</th><th>Last active</th>{% if session.is_operator %}<th><span class="sr-only">Manage</span></th>{% endif %}</tr></thead>
   <tbody>
   {% for c in rows %}
-  <tr>
-    <td><span class="dot {{ 'on' if c.online else 'off' }}" title="{{ 'online' if c.online else 'offline' }}"></span></td>
-    <td>{{ c.hostname or '—' }}</td>
-    <td class="mono">{{ c.ip or '—' }}</td>
-    <td class="mono">{{ c.mac }}</td>
-    <td>{{ c.vendor or '—' }}</td>
+  {% set is_paused = c.paused or c.mac in paused %}
+  {% set lim = c.limit %}
+  {% set is_limited = lim or c.mac in limits %}
+  {% set wait = pending.get(c.mac) %}
+  <tr class="{{ 'offline' if not c.online }}">
+    <td><div class="device"><span class="dot {{ 'on' if c.online else 'off' }}" title="{{ 'online' if c.online else 'offline' }}"></span>
+      <div><strong>{{ c.hostname or '(no name)' }}</strong><div class="small muted">{{ c.vendor or 'Unknown maker' }}</div></div></div></td>
+    <td><span class="mono">{{ c.ip or '—' }}</span><div class="small muted mono">{{ c.mac }}</div></td>
     <td>{{ c.segment or '—' }}</td>
-    <td>{{ c.first_seen | ts }}</td>
+    <td class="num speed down">{{ c.down_bps | bps if c.online else '—' }}</td>
+    <td class="num speed up">{{ c.up_bps | bps if c.online else '—' }}</td>
+    <td class="badges">
+      {% if is_paused %}<span class="badge paused">{{ icon('paused') }}Paused</span>{% endif %}
+      {% if is_limited %}<span class="badge limited">{{ icon('limited') }}{% if lim %}↓{{ '%g' % lim.down_mbps }} ↑{{ '%g' % lim.up_mbps }} Mbit/s{% else %}Limited{% endif %}</span>{% endif %}
+      {% if wait %}<a class="badge pending" href="/actions/{{ wait[0] }}">{{ icon('pending') }}{{ labels_short[wait[1]] }}</a>{% endif %}
+      {% if not (is_paused or is_limited or wait) %}<span class="badge ok">{{ icon('ok') }}Allowed</span>{% endif %}
+    </td>
     <td>{{ c.last_seen | ago }}</td>
-    {% if session.is_operator %}<td>
-      {% if c.mac in paused %}
-      <span class="status pending_approval">paused</span>
-      <form method="post" action="/actions/{{ paused[c.mac] }}/undo" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small tonal">Resume</button></form>
-      {% else %}<a href="/actions?type=pause_client&mac={{ c.mac }}">Pause…</a>{% endif %}
+    {% if session.is_operator %}<td class="manage">
+      {% if wait %}<a class="button-link small" href="/actions/{{ wait[0] }}">Approve…</a>
+      {% else %}
+      <details class="menu">
+        <summary>Manage</summary>
+        <div class="menu-panel">
+          {% if is_paused %}
+          <form method="post" action="/actions/new"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="type" value="resume_client"><input type="hidden" name="mac" value="{{ c.mac }}">
+            <button class="primary wide">Resume internet</button></form>
+          {% else %}
+          <p class="menu-label">Pause internet</p>
+          <div class="button-row">
+            {% for minutes, label in ((15, '15 min'), (60, '1 hour'), (0, 'Until resumed')) %}
+            <form method="post" action="/actions/new"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="type" value="pause_client"><input type="hidden" name="mac" value="{{ c.mac }}"><input type="hidden" name="minutes" value="{{ minutes }}">
+              <button class="small {{ 'danger' if not minutes else 'tonal' }}">{{ label }}</button></form>
+            {% endfor %}
+          </div>
+          {% endif %}
+          <p class="menu-label">Speed limit</p>
+          <form method="post" action="/actions/new" class="limit-form"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="type" value="limit_client"><input type="hidden" name="mac" value="{{ c.mac }}">
+            <label>↓ Mbit/s<input name="down_mbps" type="number" min="0.1" max="1000" step="0.1" value="{{ '%g' % lim.down_mbps if lim else 10 }}" required></label>
+            <label>↑ Mbit/s<input name="up_mbps" type="number" min="0.1" max="1000" step="0.1" value="{{ '%g' % lim.up_mbps if lim else 5 }}" required></label>
+            <label>For<select name="minutes"><option value="60">1 hour</option><option value="240">4 hours</option><option value="1440">1 day</option><option value="0" selected>Until removed</option></select></label>
+            <button class="small tonal">{{ 'Change limit' if is_limited else 'Apply limit' }}</button>
+          </form>
+          {% if is_limited %}
+          <form method="post" action="/actions/new"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="type" value="unlimit_client"><input type="hidden" name="mac" value="{{ c.mac }}">
+            <button class="small text wide">Remove speed limit</button></form>
+          {% endif %}
+        </div>
+      </details>
+      {% endif %}
     </td>{% endif %}
   </tr>
   {% else %}
-  <tr><td colspan="9" class="muted">No clients reported yet.</td></tr>
+  <tr><td colspan="8" class="muted">No clients reported yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </section>
-<p class="muted small">Per-client traffic needs a NetFlow collector; see docs/RUNBOOK.md.</p>
+<p class="muted small">Speeds are averaged over the firewall's last report (every 30 s). Paused and limited states come from the firewall itself.</p>
 {% endblock %}

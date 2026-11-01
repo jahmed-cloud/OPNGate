@@ -35,6 +35,11 @@ class Settings:
     coraza_audit_log: Path = field(default_factory=lambda: Path(_env("PORTAL_CORAZA_AUDIT_LOG", "/logs/caddy/coraza-audit.log")))
     # Shared secret for the WAF shipper on the proxy host (POST /internal/waf-hits).
     waf_ship_token: str = field(default_factory=lambda: _env("PORTAL_WAF_SHIP_TOKEN"))
+    # Time zone for pages until the browser reports its own (the "tz" cookie set by portal.js).
+    default_tz: str = field(default_factory=lambda: _env("PORTAL_TZ", "UTC"))
+    # CrowdSec central API and a bouncer key, read-only, for the active bans on the Threats page.
+    crowdsec_lapi: str = field(default_factory=lambda: _env("PORTAL_CROWDSEC_LAPI"))
+    crowdsec_key: str = field(default_factory=lambda: _env("PORTAL_CROWDSEC_KEY"))
     oui_file: Path = field(default_factory=lambda: Path(_env("PORTAL_OUI_FILE", "./data/oui.txt")))
 
     idle_timeout: int = 30 * 60

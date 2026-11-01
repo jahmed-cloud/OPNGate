@@ -113,7 +113,7 @@ function startLive() {
     const status = document.getElementById("refresh-status");
     if (status) status.textContent = failed ? "Refresh failed. Displayed figures may be stale; use Refresh to retry."
       : paused ? "Automatic updates paused. Use Refresh for a manual update."
-      : `Last updated ${new Date(last).toISOString().replace("T", " ").slice(0, 19)} UTC. All graph times are UTC.`;
+      : `Last updated ${new Date(last).toLocaleTimeString()}. Times shown in ${status.dataset.tz || "your time zone"}.`;
     const age = Math.round((Date.now() - last) / 1000);
     chip.title = paused ? "Live updates paused. Click to resume."
       : `Updated ${age < 5 ? "just now" : age + " s ago"}; refreshes every ${every} s. Click to pause.`;
@@ -158,7 +158,63 @@ function startLive() {
   label();
 }
 
+// Tell the server the browser's time zone (a plain "tz" cookie) so pages show local times.
+// Reload once when it changes; the sessionStorage flag stops a loop if cookies are blocked.
+function syncTimeZone() {
+  let tz = "";
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (_) { return; }
+  if (!/^[A-Za-z0-9_+\-\/]{1,64}$/.test(tz)) return;
+  const current = (document.cookie.match(/(?:^|; )tz=([^;]*)/) || [])[1];
+  if (current && decodeURIComponent(current) === tz) return;
+  document.cookie = `tz=${encodeURIComponent(tz)}; path=/; max-age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
+  try {
+    if (sessionStorage.getItem("portal-tz") === tz) return;
+    sessionStorage.setItem("portal-tz", tz);
+  } catch (_) { return; }
+  window.location.reload();
+}
+
+function bindThemeToggle() {
+  const button = document.getElementById("theme-toggle");
+  if (!button) return;
+  const names = { "": "Theme: follows your system", light: "Theme: light", dark: "Theme: dark" };
+  const show = () => { button.title = names[document.documentElement.dataset.theme || ""] + ". Click to change."; };
+  button.addEventListener("click", () => {
+    const next = { "": "light", light: "dark", dark: "" }[document.documentElement.dataset.theme || ""];
+    if (next) document.documentElement.dataset.theme = next;
+    else delete document.documentElement.dataset.theme;
+    try { next ? localStorage.setItem("portal-theme", next) : localStorage.removeItem("portal-theme"); } catch (_) { /* storage blocked */ }
+    show();
+  });
+  show();
+}
+
+// Row menus (Clients > Manage) live inside a scrolling table, which would clip them, so the open
+// panel is placed against the window instead. Delegated, because live refresh replaces the table.
+function bindMenus() {
+  const closeAll = (except) => document.querySelectorAll("details.menu[open]").forEach((d) => { if (d !== except) d.open = false; });
+  document.addEventListener("toggle", (ev) => {
+    const menu = ev.target;
+    if (!(menu instanceof HTMLDetailsElement) || !menu.classList.contains("menu") || !menu.open) return;
+    closeAll(menu);
+    const panel = menu.querySelector(".menu-panel");
+    const box = menu.querySelector("summary").getBoundingClientRect();
+    panel.style.position = "fixed";
+    panel.style.left = `${Math.max(8, box.right - panel.offsetWidth)}px`;
+    const below = box.bottom + 6;
+    panel.style.top = `${below + panel.offsetHeight > window.innerHeight - 8 ? Math.max(8, box.top - panel.offsetHeight - 6) : below}px`;
+    panel.querySelector("button, input, select")?.focus({ preventScroll: true });
+  }, true);
+  document.addEventListener("click", (ev) => { if (!ev.target.closest("details.menu")) closeAll(); });
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeAll(); });
+  window.addEventListener("resize", () => closeAll());
+  document.addEventListener("scroll", (ev) => { if (!ev.target.closest?.(".menu-panel")) closeAll(); }, true);
+}
+
 document.addEventListener("DOMContentLoaded", () => {
+  bindMenus();
+  bindThemeToggle();
+  syncTimeZone();
   startLive();
   if (!window.PublicKeyCredential) {
     document.querySelectorAll("#passkey-login, #stepup-passkey, #register-key, #approve-action")

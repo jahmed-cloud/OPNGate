@@ -2,6 +2,22 @@
 
 Deploy read-only first and pass each gate before proceeding. Back up existing configurations. Commands below run on the named host; replace all example addresses/domains.
 
+## One-command setup
+
+`deploy/deploy.sh` automates sections 1 to 4 and 6 from your admin PC. Copy `deploy/deploy.conf.example` to
+`deploy/deploy.conf`, fill in the domain, box addresses, SSH key, ADMIN_IP and interface names, then:
+
+```sh
+sh deploy/deploy.sh check      # SSH and Docker on every box
+sh deploy/deploy.sh all        # pki secrets services edge firewall hostfw user status
+sh deploy/deploy.sh keys       # after registering a passkey: trust it on the firewall
+```
+
+Steps can be rerun on their own. `secrets` fetches the `.env` files from boxes that already have them, and the
+`services`, `edge` and `firewall` steps stop if a box's certificate differs from `deploy/pki/out` (set FORCE_PKI=yes
+only when rotating the CA). `hostfw` refuses to run unless the Pi sees your SSH session coming from ADMIN_IP.
+The gates below still apply: check each one before moving on.
+
 ## Layout and prerequisites
 
 Current examples use OPNsense `10.10.0.1`, Pi 5 edge `10.10.0.21`, Pi 4 services `10.10.0.22`. Install 64-bit Linux and Docker Compose on both Pis; use an SSD for services data. Use a separate admin workstation and preferably routed VLANs. Configure DNS and time synchronization.
@@ -105,19 +121,20 @@ Configure Cloudflare DNS proxying and Full (strict) TLS. Point the required DNS 
 
 ## 5. Enable WAF enforcement carefully
 
-Review detection events and application behavior for at least a normal operating cycle. Tune narrowly for legitimate requests. Set WAF_MODE=On and recreate Caddy, or copy the WAF snippet with explicit On for one site at a time.
+Review detection events and application behavior for at least a normal operating cycle. Tune narrowly for legitimate requests: rules and exclusions live in the `(waf)` snippet of `deploy/edge/caddy/Caddyfile` (for example `SecRuleRemoveById 911100` for apps that use PUT), never in the portal. Set WAF_MODE=On and recreate Caddy, or copy the WAF snippet with explicit On for one site at a time.
 
 **Gate:** a benign request succeeds, a controlled known rule test is interrupted, confirmed blocks appear in Threats, and normal application login/uploads/API clients continue to work. Never use WAF counters alone to establish coverage. Consult [Coraza configuration](https://www.coraza.io/docs/seclang/directives/) when tuning.
 
 ## 6. Optional signed controls
 
-Create the OPNsense external aliases/tables `portal_block` and `portal_paused` and matching quick block rules before enabling controls. Exempt management hosts above those rules. Register two operator security keys in the portal.
+Create the OPNsense external aliases/tables `portal_block` and `portal_paused` and matching quick block rules before enabling controls (`deploy.sh firewall` does this with `agent/portal_rules.php`; it skips rules that already exist). Exempt management hosts above those rules. Register two operator security keys in the portal.
 
 On services, export the public trust store, then transfer it from your admin workstation to the firewall:
 
 ```sh
 docker compose run --rm portal python -m app.cli export-keys > operator_keys.json
 scp operator_keys.json root@10.10.0.1:/usr/local/etc/fw-agent/operator_keys.json
+# or, from the admin PC: sh deploy/deploy.sh keys
 ```
 
 Set protected_cidrs and protected_macs for your admin devices and infrastructure. Enable actions explicitly in agent.json and restart the service. Re-export the trust store whenever operator keys change; never automate trust-store installation from the portal.
@@ -141,4 +158,4 @@ Configure Coraza audit-log rotation/retention on the edge; access-log rotation i
 | Suspected compromise | Stop stacks and agent; inspect firewall state, restore trusted configuration and rotate credentials |
 | Stale graphs | Inspect agent service, ingest TLS/ports, time synchronization and services logs; do not assume zero traffic |
 
-Per-client bandwidth is not collected by this portal; add a separately secured NetFlow collector if needed. Whole-WAN/interface rates are supported. See [METRICS.md](METRICS.md) for endpoint and measurement definitions and [REVIEW.md](../REVIEW.md) for verification limits.
+Per-device speeds come from the firewall's pf state byte counters on inside interfaces, averaged over each 30-second report. Speed limits use OPNsense's traffic shaper (dummynet pipes tagged `[portal-<mac>]`, visible under Firewall > Shaper) and follow a device if its IP changes. See [METRICS.md](METRICS.md) for endpoint and measurement definitions and [REVIEW.md](../REVIEW.md) for verification limits.

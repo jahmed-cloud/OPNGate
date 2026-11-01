@@ -15,3 +15,7 @@ __pycache__/
 
 # Real home IP; commit only the .example
 deploy/*/crowdsec/parsers/home-whitelist.yaml
+
+# Real deploy settings; commit only the .example
+deploy/deploy.conf
+.tmp-operator_keys.json

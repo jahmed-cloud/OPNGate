@@ -116,16 +116,23 @@ def _merge_clients(clients: list, now: int) -> None:
             # "last seen" means last heard from, not "still in the ARP table".
             idle = c.get("idle_s")
             heard = now - min(int(idle), 3600) if isinstance(idle, (int, float)) and idle >= 0 else now
+            # What the firewall itself enforces right now; the Clients page badges come from here.
+            limit = c.get("limit") if isinstance(c.get("limit"), dict) else None
+            limit_json = json.dumps({k: _num(limit.get(k)) for k in ("down_mbps", "up_mbps", "until")}) if limit else None
+            live = (_num(c.get("down_bps")) if online else None, _num(c.get("up_bps")) if online else None,
+                    1 if c.get("paused") is True else 0, limit_json)
             if existing:
                 conn.execute(
                     "UPDATE clients SET ip=COALESCE(?, ip), hostname=COALESCE(NULLIF(?, ''), hostname), "
-                    "segment=COALESCE(?, segment), online=?, last_seen=CASE WHEN ? THEN ? ELSE last_seen END WHERE mac=?",
-                    (c.get("ip"), c.get("hostname") or "", c.get("segment"), online, online, heard, mac),
+                    "segment=COALESCE(?, segment), online=?, last_seen=CASE WHEN ? THEN ? ELSE last_seen END, "
+                    "down_bps=?, up_bps=?, paused=?, speed_limit=? WHERE mac=?",
+                    (c.get("ip"), c.get("hostname") or "", c.get("segment"), online, online, heard, *live, mac),
                 )
             else:
                 conn.execute(
-                    "INSERT INTO clients(mac, ip, hostname, vendor, segment, online, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (mac, c.get("ip"), c.get("hostname") or "", oui.vendor(mac), c.get("segment"), online, now, heard),
+                    "INSERT INTO clients(mac, ip, hostname, vendor, segment, online, first_seen, last_seen, "
+                    "down_bps, up_bps, paused, speed_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (mac, c.get("ip"), c.get("hostname") or "", oui.vendor(mac), c.get("segment"), online, now, heard, *live),
                 )
                 if db.kv_get("clients_baselined"):
                     conn.execute(
@@ -135,9 +142,9 @@ def _merge_clients(clients: list, now: int) -> None:
                     notify.send(f"New device on {c.get('segment') or '?'}: {c.get('hostname') or '(no name)'} {mac} {c.get('ip') or ''}")
         if seen:
             marks = ",".join("?" * len(seen))
-            conn.execute(f"UPDATE clients SET online=0 WHERE mac NOT IN ({marks})", tuple(seen))
+            conn.execute(f"UPDATE clients SET online=0, down_bps=NULL, up_bps=NULL WHERE mac NOT IN ({marks})", tuple(seen))
         else:
-            conn.execute("UPDATE clients SET online=0")
+            conn.execute("UPDATE clients SET online=0, down_bps=NULL, up_bps=NULL")
     # The first report is the baseline; only devices after that count as "new".
     if clients and not db.kv_get("clients_baselined"):
         db.kv_set("clients_baselined", "1")
