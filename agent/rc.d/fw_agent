@@ -1,0 +1,22 @@
+#!/bin/sh
+#
+# PROVIDE: fw_agent
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# Enable with: sysrc fw_agent_enable=YES  (or /etc/rc.conf.d/fw_agent)
+
+. /etc/rc.subr
+
+name="fw_agent"
+rcvar="fw_agent_enable"
+load_rc_config $name
+
+: ${fw_agent_enable:="NO"}
+: ${fw_agent_config:="/usr/local/etc/fw-agent/agent.json"}
+
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+command_args="-r -R 10 -P ${pidfile} -S -T fw-agent /usr/local/bin/python3 /usr/local/opnsense/scripts/fw-agent/fw_agent.py -c ${fw_agent_config}"
+
+run_rc_command "$1"

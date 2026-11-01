@@ -1,0 +1,45 @@
+{% if not fragment %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf" content="{{ csrf }}">
+<title>{% block title %}{{ rp_name }}{% endblock %}</title>
+<link rel="stylesheet" href="/static/portal.css?v=5">
+<script src="/static/portal.js?v=5" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+{% if session %}
+<header class="appbar">
+  <a class="brand" href="/">
+    <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5z"/></svg>
+    <span>{{ rp_name }}</span>
+  </a>
+  <nav class="navtabs" aria-label="Main navigation">
+    {% for href, label in nav %}
+    <a href="{{ href }}" class="{{ 'active' if (path == href or (href != '/' and path.startswith(href))) else '' }}"{% if path == href or (href != '/' and path.startswith(href)) %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <div class="me">
+    {% if refresh %}
+    <button type="button" class="chip live" id="live" aria-pressed="true" title="Updates every {{ refresh }} s. Click to pause.">
+      <span class="pulse" aria-hidden="true"></span><span id="live-text">Live</span>
+    </button>
+    <button type="button" class="chip" id="refresh-now" title="Refresh dashboard now">Refresh</button>
+    {% endif %}
+    <a class="avatar" href="/security" title="{{ session.username }} · {{ session.role }}">{{ session.username[:1] | upper }}</a>
+    <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="text">Sign out</button></form>
+  </div>
+</header>
+{% if refresh %}<div class="refresh-status" id="refresh-status" role="status" aria-live="polite">Auto-refresh every {{ refresh }} seconds. All graph times are UTC.</div>{% endif %}
+{% endif %}
+<main id="main" tabindex="-1"{% if refresh %} data-refresh="{{ refresh }}"{% endif %}>
+{% endif %}
+{% block content %}{% endblock %}
+{% if not fragment %}
+</main>
+{% if session %}<footer class="app-footer">Gateway telemetry &amp; security operations <span>All timestamps in UTC</span></footer>{% endif %}
+</body>
+</html>
+{% endif %}

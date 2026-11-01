@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Traffic · {{ rp_name }}{% endblock %}
+{% block content %}
+{% set s = metrics.summary %}
+<div class="page-head">
+  <div><p class="eyebrow">Bandwidth</p><h1>Traffic</h1><p class="page-description">WAN throughput over time and the latest interface rates.</p></div>
+  <div class="page-tools"><div class="tabs" aria-label="Time range">{% for r in ranges %}<a href="?range={{ r }}" class="{{ 'active' if r == range_key }}"{% if r == range_key %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</div>
+  <a class="button-link" href="/exports/metrics.csv?range={{ range_key }}">Export CSV</a></div>
+</div>
+<div class="tiles">
+  <div class="tile"><span class="label">Peak download</span><span class="value compact">{{ s.rx_peak_bps | bps }}</span><span class="sub">Highest observed sample · {{ range_key }}</span></div>
+  <div class="tile"><span class="label">Peak upload</span><span class="value compact">{{ s.tx_peak_bps | bps }}</span><span class="sub">Highest observed sample · {{ range_key }}</span></div>
+  <div class="tile"><span class="label">Bucket coverage</span><span class="value">{{ '%.1f' % s.coverage_pct }}<small>%</small></span><span class="sub">{{ s.sample_count }} samples in {{ s.occupied_buckets }} buckets</span></div>
+</div>
+<div class="grid2 chart-grid-layout">
+  <section class="card"><div class="card-head"><h2>WAN download</h2><span class="chart-unit">bit/s · UTC</span></div>{{ time_chart(metrics.points, 'rx_bps', 'WAN download', 'bit/s', start=metrics.start, end=metrics.end) }}</section>
+  <section class="card"><div class="card-head"><h2>WAN upload</h2><span class="chart-unit">bit/s · UTC</span></div>{{ time_chart(metrics.points, 'tx_bps', 'WAN upload', 'bit/s', cls='alt', start=metrics.start, end=metrics.end) }}</section>
+</div>
+<p class="chart-note">{{ metrics.bucket_seconds }}-second averages; missing telemetry leaves gaps. Hover a point for time and rate. Export includes the same bucketed observations.</p>
+<section class="card scroll">
+  <div class="card-head"><h2>Interface snapshot</h2><span class="muted small">Reported {{ updated | ts }}</span></div>
+  <p class="muted small">In and out are relative to the firewall interface. On an inside interface, out is the devices’ download.</p>
+  <table><thead><tr><th>Segment</th><th>Interface</th><th>In</th><th>Out</th></tr></thead><tbody>
+  {% for i in interfaces %}<tr><td>{{ i.segment }}</td><td class="mono">{{ i.name }}</td><td>{{ i.rx_bps | bps }}</td><td>{{ i.tx_bps | bps }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Waiting for interface telemetry.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

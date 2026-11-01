@@ -1,0 +1,17 @@
+# Install: cp gw-hostfw.sh /usr/local/sbin/ && cp gw-hostfw@.service /etc/systemd/system/
+#          systemctl enable --now gw-hostfw@edge      (Pi 5)   or   gw-hostfw@services   (Pi 4)
+[Unit]
+Description=Gateway host firewall (%i)
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /usr/local/sbin/gw-hostfw.sh %i
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target docker.service

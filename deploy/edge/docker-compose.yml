@@ -1,0 +1,85 @@
+# Raspberry Pi 5 (edge): Cloudflare proxy -> static IP -> OPNsense port forward 80/443 -> Caddy
+# (Coraza/OWASP CRS + CrowdSec bouncer) -> apps. Caddy drops requests that don't come from Cloudflare.
+# The Pi 5 opens connections only to the Pi 4 (portal :9443, CrowdSec :9080) and to the app upstreams
+# you list in the Caddyfile (enforced by deploy/hostfw while there are no VLANs).
+
+name: gw-edge
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  caddy-logs:
+  caddy-data:
+  crowdsec-db:
+  crowdsec-config:
+  shipper-state:
+
+services:
+  caddy:
+    build: ./caddy
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+      PORTAL_UPSTREAM: ${SERVICES_HOST_IP:?set SERVICES_HOST_IP}:9443
+      CROWDSEC_LAPI: http://${SERVICES_HOST_IP}:9080
+      CROWDSEC_CADDY_KEY: ${CROWDSEC_CADDY_KEY:?set CROWDSEC_CADDY_KEY}
+      WAF_MODE: ${WAF_MODE:-DetectionOnly}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../pki/out/ingest-ca.pem:/pki/ingest-ca.pem:ro
+      - caddy-logs:/var/log/caddy
+      - caddy-data:/data
+    # IPv4 only: the firewall forwards IPv4, and Docker's IPv6 proxy would hide the real source address.
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    networks:
+      edge: { ipv4_address: 172.30.0.3 }
+    restart: unless-stopped
+
+  # Log processor only; decisions live in the central API on the Pi 4.
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.6.8
+    environment:
+      DISABLE_LOCAL_API: "true"
+      LOCAL_API_URL: http://${SERVICES_HOST_IP}:9080
+      AGENT_USERNAME: edge-pi5
+      AGENT_PASSWORD: ${CROWDSEC_EDGE_PASSWORD:?set CROWDSEC_EDGE_PASSWORD}
+      COLLECTIONS: >-
+        crowdsecurity/caddy crowdsecurity/base-http-scenarios crowdsecurity/http-cve
+        crowdsecurity/whitelist-good-actors
+    volumes:
+      - crowdsec-db:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./crowdsec/parsers/home-whitelist.yaml:/etc/crowdsec/parsers/s02-enrich/home-whitelist.yaml:ro
+      - caddy-logs:/var/log/caddy:ro
+    networks:
+      edge: { ipv4_address: 172.30.0.5 }
+    restart: unless-stopped
+
+  # Counts WAF detections/blocks per site and sends the totals to the portal (Threats page).
+  waf-shipper:
+    build: ../../portal
+    command: python -m app.waflog ship
+    environment:
+      PORTAL_SHIP_URL: https://${SERVICES_HOST_IP}:9443/internal/waf-hits
+      PORTAL_SHIP_CA: /pki/ingest-ca.pem
+      PORTAL_WAF_SHIP_TOKEN: ${PORTAL_WAF_SHIP_TOKEN:?set PORTAL_WAF_SHIP_TOKEN}
+      PORTAL_CADDY_ACCESS_LOG: /logs/caddy/access.log
+      PORTAL_CORAZA_AUDIT_LOG: /logs/caddy/coraza-audit.log
+      PORTAL_DATA_DIR: /data
+    volumes:
+      - caddy-logs:/logs/caddy:ro
+      - shipper-state:/data
+      - ../pki/out/ingest-ca.pem:/pki/ingest-ca.pem:ro
+    # Fixed address, like the other services.
+    networks:
+      edge: { ipv4_address: 172.30.0.6 }
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped

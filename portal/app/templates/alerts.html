@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Alerts</h1>
+  <form class="filters" method="get">
+    <input name="q" value="{{ q }}" placeholder="Search" aria-label="Search alerts" maxlength="200">
+    <select name="severity" aria-label="Severity"><option value="">All severities</option>{% for s in severities %}<option value="{{ s }}" {{ 'selected' if s == severity }}>{{ s | title }}</option>{% endfor %}</select>
+    <select name="source" aria-label="Source"><option value="">All sources</option>{% for s in sources %}<option value="{{ s }}" {{ 'selected' if s == source }}>{{ s }}</option>{% endfor %}</select>
+    <select name="show"><option value="open" {{ 'selected' if show == 'open' }}>Unacknowledged</option>
+      <option value="all" {{ 'selected' if show == 'all' }}>All</option></select>
+    <button>Filter</button>
+  </form>
+</div>
+<section class="card scroll">
+<table>
+  <thead><tr><th>Time</th><th>Source</th><th>Severity</th><th>Event</th><th></th></tr></thead>
+  <tbody>
+  {% for e in rows %}
+  <tr>
+    <td>{{ e.ts | ts }}</td><td>{{ e.source }}</td><td><span class="sev {{ e.severity }}">{{ e.severity }}</span></td>
+    <td>{{ e.title }}{% if e.detail %}<details><summary>detail</summary><pre>{{ e.detail | pretty }}</pre></details>{% endif %}</td>
+    <td>{% if e.acked_at %}<span class="muted small">ack {{ e.acked_by }} {{ e.acked_at | ago }}</span>
+        {% else %}<form method="post" action="/alerts/{{ e.id }}/ack"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small">Acknowledge</button></form>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">Nothing here.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</section>
+{% endblock %}

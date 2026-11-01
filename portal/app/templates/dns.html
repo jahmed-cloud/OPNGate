@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>DNS</h1><span class="muted">updated {{ updated | ago }}</span></div>
+<div class="tiles">
+  <div class="tile"><span class="label">Queries</span><span class="value">{{ data.total_queries if data.total_queries is defined else '—' }}</span><span class="sub">since Unbound start</span></div>
+  <div class="tile"><span class="label">Cache hits</span><span class="value">{{ data.cache_hits if data.cache_hits is defined else '—' }}</span></div>
+  <div class="tile"><span class="label">Blocked</span><span class="value">{{ data.blocked if data.blocked is defined else '—' }}</span><span class="sub">{{ ('%.1f %%' % data.blocked_pct) if data.blocked_pct is defined else '' }}</span></div>
+  <div class="tile"><span class="label">Blocklist size</span><span class="value">{{ data.blocklist_size if data.blocklist_size is defined else '—' }}</span></div>
+</div>
+<div class="grid2">
+  <section class="card"><h2>Top blocked domains</h2>
+    <table><tbody>{% for d, n in (data.top_blocked or {}).items() %}<tr><td class="mono">{{ d }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td class="muted">Needs the local OPNsense API key in the agent config.</td></tr>{% endfor %}</tbody></table></section>
+  <section class="card"><h2>Top clients</h2>
+    <table><tbody>{% for c, n in (data.top_clients or {}).items() %}<tr><td class="mono">{{ c }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td class="muted">No data.</td></tr>{% endfor %}</tbody></table></section>
+</div>
+{% endblock %}

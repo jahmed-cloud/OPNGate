@@ -1,0 +1,21 @@
+# Parses lines written by portal/app/security.py audit():
+#   2026-11-01T12:00:00Z portal-auth event=login_failed ok=0 ip=203.0.113.7 user="bob"
+# crowdsecurity/non-syslog (stage s00) puts the line in evt.Parsed.message and the label type in program.
+onsuccess: next_stage
+filter: "evt.Parsed.program == 'portal-auth'"
+name: local/portal-auth
+description: "Home gateway portal authentication log"
+grok:
+  pattern: '^%{TIMESTAMP_ISO8601:timestamp} portal-auth event=%{WORD:event} ok=%{INT:ok} ip=%{IP:source_ip} user="%{DATA:user}"$'
+  apply_on: message
+statics:
+  - meta: service
+    value: portal
+  - meta: log_type
+    expression: "evt.Parsed.event in ['login_failed', 'stepup_failed', 'login_throttled'] ? 'portal_auth_failed' : 'portal_auth'"
+  - meta: source_ip
+    expression: evt.Parsed.source_ip
+  - meta: username
+    expression: evt.Parsed.user
+  - target: evt.StrTime
+    expression: evt.Parsed.timestamp

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Overview · {{ rp_name }}{% endblock %}
+{% block content %}
+{% set s = metrics.summary %}
+<div class="page-head">
+  <div><p class="eyebrow">Network operations</p><h1>Gateway overview</h1><p class="page-description">Connectivity, traffic, and signals that need your attention.</p></div>
+  <div class="page-tools"><div class="tabs" aria-label="Time range">{% for r in ranges %}<a href="?range={{ r }}" class="{{ 'active' if r == range_key }}"{% if r == range_key %} aria-current="true"{% endif %}>{{ r }}</a>{% endfor %}</div>
+  <a class="button-link" href="/exports/metrics.csv?range={{ range_key }}">Export CSV</a></div>
+</div>
+{% if not agent_online %}
+<p class="banner warn"><strong>{{ 'Telemetry is stale' if last_seen else 'Waiting for the firewall agent' }}.</strong> Last report: {{ last_seen | ts }}. Current connectivity cannot be confirmed.</p>
+{% endif %}
+<div class="tiles overview-tiles">
+  <div class="tile {{ 'ok' if wan_state == 'online' else 'bad' if wan_state == 'offline' else '' }}">
+    <span class="label">Internet</span><span class="value">{{ wan_state | title }}</span><span class="sub">{{ gw.name or 'WAN' }} · {{ gw.wan_ip or 'IP unavailable' }}</span></div>
+  <div class="tile"><span class="label">Latest latency</span><span class="value">{{ '%.1f' % latest.latency_ms if latest and latest.latency_ms is not none else '—' }} <small>ms</small></span>
+    <span class="sub">Packet loss {{ '%.1f' % latest.loss_pct if latest and latest.loss_pct is not none else '—' }}%</span></div>
+  <div class="tile"><span class="label">Download / upload</span><span class="value compact">↓ {{ latest.rx_bps | bps if latest else '—' }}</span><span class="sub">↑ {{ latest.tx_bps | bps if latest else '—' }}</span></div>
+  <a class="tile tile-link" href="/clients"><span class="label">Clients online</span><span class="value">{{ clients_online }}</span><span class="sub">Explore devices →</span></a>
+  <a class="tile tile-link {{ 'bad' if open_alerts else '' }}" href="/alerts"><span class="label">Open alerts</span><span class="value">{{ open_alerts }}</span><span class="sub">Review events →</span></a>
+  <div class="tile"><span class="label">Firewall uptime</span><span class="value compact">{{ gw.uptime_s | duration if gw.uptime_s else '—' }}</span><span class="sub">Last report {{ last_seen | ago }}</span></div>
+</div>
+<section class="card availability-card">
+  <div class="card-head"><div><h2>Observed availability</h2><p class="muted small">{{ range_key }} window · missing telemetry is shown separately</p></div><div class="availability-number">{{ '%.2f' % availability if availability is not none else '—' }}<small>%</small></div></div>
+  {{ uptime_bar(segments, metrics.start, metrics.end) }}
+  <div class="card-head"><div class="legend"><span class="seg-key up"></span>up <span class="seg-key down"></span>outage <span class="seg-key nodata"></span>no WAN observation</div><span class="small muted">{{ '%.1f' % s.coverage_pct }}% bucket coverage · {{ s.sample_count }} samples</span></div>
+  <p class="small muted">Availability is the share of known WAN samples that were up. Coverage is the share of time buckets with telemetry, not measured uptime.</p>
+</section>
+<div class="grid2 chart-grid-layout">
+  <section class="card"><div class="card-head"><h2>Gateway latency</h2><span class="chart-unit">ms · UTC</span></div>
+    <div class="chart-summary"><span><strong>{{ '%.1f' % s.latency_avg_ms if s.latency_avg_ms is not none else '—' }}</strong> average</span><span><strong>{{ '%.1f' % s.latency_max_ms if s.latency_max_ms is not none else '—' }}</strong> peak</span></div>
+    {{ time_chart(metrics.points, 'latency_ms', 'Gateway latency', 'ms', start=metrics.start, end=metrics.end) }}</section>
+  <section class="card"><div class="card-head"><h2>Packet loss</h2><span class="chart-unit">% · UTC</span></div>
+    <div class="chart-summary"><span><strong>{{ '%.2f' % s.loss_avg_pct if s.loss_avg_pct is not none else '—' }}%</strong> average</span><span>Lower is better</span></div>
+    {{ time_chart(metrics.points, 'loss_pct', 'Packet loss', '%', cls='warn', start=metrics.start, end=metrics.end) }}</section>
+</div>
+<p class="chart-note">Graphs show averages in {{ metrics.bucket_seconds }}-second buckets. Gaps indicate missing observations. Hover a point for its UTC timestamp.</p>
+<section class="card">
+  <div class="card-head"><div><h2>Network flow</h2><p class="muted small">Snapshot reported {{ last_seen | ts }}{% if not agent_online %} · stale{% endif %}</p></div><div class="legend"><span class="lane-key down"></span>download <span class="lane-key up"></span>upload</div></div>
+  <div class="flow-wrap {{ 'stale-flow' if not agent_online }}">{{ flow_map(flow_gw, flow_wan, flow_segments) }}</div>
+</section>
+<div class="grid2">
+  <section class="card scroll"><div class="card-head"><h2>Outages</h2><span class="muted small">{{ range_key }} · UTC</span></div>
+    {% if outages %}<table><thead><tr><th>Started (UTC)</th><th>Ended (UTC)</th><th>Duration</th></tr></thead><tbody>
+    {% for o in outages %}<tr><td>{{ o.start_ts | ts }}</td><td>{{ o.end_ts | ts if o.end_ts else 'ongoing' }}</td><td>{{ ((o.end_ts or now) - o.start_ts) | duration }}</td></tr>{% endfor %}
+    </tbody></table>{% else %}<div class="empty-state"><strong>No recorded outages</strong><p>Missing telemetry does not confirm an outage or uninterrupted service.</p></div>{% endif %}
+  </section>
+  <section class="card"><div class="card-head"><h2>Security workspace</h2><a class="small" href="/threats">Open threats →</a></div>
+    <p class="muted">This portal monitors your gateway. Web request inspection runs at the edge through Caddy, Coraza, and OWASP CRS.</p>
+    <div class="capability-row"><span>Web application firewall</span><span class="status">Verify at edge</span></div>
+    <p class="small muted">WAF mode is not verified by this dashboard. Confirm the edge configuration and run a protection check before relying on blocking.</p>
+    <div class="quick-links"><a href="/alerts">Investigate alerts</a><a href="/traffic?range={{ range_key }}">Inspect traffic</a>{% if session.is_operator %}<a href="/actions">Signed actions</a>{% endif %}</div>
+  </section>
+</div>
+{% if recent_alerts %}<section class="card activity-card"><div class="card-head"><h2>Latest open alerts</h2><a href="/alerts" class="small">View all →</a></div>
+  {% for e in recent_alerts %}<div class="activity-row"><span class="sev {{ e.severity }}">{{ e.severity }}</span><span>{{ e.title }} <small class="muted">{{ e.source }}</small></span><time class="small muted">{{ e.ts | ts }}</time></div>{% endfor %}
+</section>{% endif %}
+{% endblock %}

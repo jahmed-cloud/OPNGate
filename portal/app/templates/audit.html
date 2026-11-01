@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Audit</h1><span class="muted">last 500 entries</span></div>
+<section class="card scroll">
+<table>
+  <thead><tr><th>Time</th><th>User</th><th>From</th><th>Event</th><th>Result</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for a in rows %}
+  <tr class="{{ '' if a.ok else 'row-bad' }}">
+    <td>{{ a.ts | ts }}</td><td>{{ a.username or '—' }}</td><td class="mono">{{ a.ip }}</td>
+    <td>{{ a.event }}</td><td>{{ 'ok' if a.ok else 'FAILED' }}</td><td class="small">{{ a.detail or '' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+{% endblock %}

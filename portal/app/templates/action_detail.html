@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card narrow">
+  <h1>{{ labels[a.type] }}</h1>
+  <p>Status: <span class="status {{ a.status }}">{{ a.status | replace('_', ' ') }}</span> · created by {{ a.created_by }} {{ a.created_at | ago }} · expires {{ a.expires_at | ts }}</p>
+  <h2>Exactly what you are signing</h2>
+  <pre class="payload">{{ payload }}</pre>
+  <p class="error hidden" id="wa-error" role="alert"></p>
+  {% if a.status == 'pending_approval' %}
+  <div class="row">
+    <button class="primary" id="approve-action" data-action="{{ a.id }}">Approve with security key</button>
+    <form method="post" action="/actions/{{ a.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Cancel</button></form>
+  </div>
+  {% elif a.status == 'approved' %}
+  <p>Waiting for the firewall to fetch it (every 15 s).</p>
+  <form method="post" action="/actions/{{ a.id }}/cancel"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Cancel</button></form>
+  {% endif %}
+  {% if a.result %}<h2>Firewall result</h2><pre>{{ a.result | pretty }}</pre>{% endif %}
+  {% if undo %}
+  <div class="row">
+    <form method="post" action="/actions/{{ a.id }}/undo"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="tonal">Undo: {{ labels[undo[0]] | lower }}</button></form>
+    <span class="muted small">You'll sign the undo with your security key, like any action.</span>
+  </div>
+  {% endif %}
+  <p><a href="/actions">Back to actions</a></p>
+</section>
+{% endblock %}

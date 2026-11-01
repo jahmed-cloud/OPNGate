@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <h1>Clients <span class="muted">{{ rows | length }}</span></h1>
+  <form class="filters" method="get">
+    <input name="q" value="{{ q }}" placeholder="Name, IP, MAC or maker" aria-label="Search clients" maxlength="200">
+    <select name="segment"><option value="">All segments</option>
+      {% for s in segments %}<option {{ 'selected' if s == segment }}>{{ s }}</option>{% endfor %}</select>
+    <select name="show"><option value="online" {{ 'selected' if show == 'online' }}>Online now</option>
+      <option value="all" {{ 'selected' if show == 'all' }}>All ever seen</option></select>
+    <button>Filter</button>
+  </form>
+</div>
+{% if limited %}<p class="banner warn">Showing the first 500 matching devices. Narrow your search or segment.</p>{% endif %}
+<section class="card scroll">
+<table>
+  <thead><tr><th></th><th>Name</th><th>IP</th><th>MAC</th><th>Maker</th><th>Segment</th><th>First seen</th><th>Last active</th>{% if session.is_operator %}<th></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for c in rows %}
+  <tr>
+    <td><span class="dot {{ 'on' if c.online else 'off' }}" title="{{ 'online' if c.online else 'offline' }}"></span></td>
+    <td>{{ c.hostname or '—' }}</td>
+    <td class="mono">{{ c.ip or '—' }}</td>
+    <td class="mono">{{ c.mac }}</td>
+    <td>{{ c.vendor or '—' }}</td>
+    <td>{{ c.segment or '—' }}</td>
+    <td>{{ c.first_seen | ts }}</td>
+    <td>{{ c.last_seen | ago }}</td>
+    {% if session.is_operator %}<td>
+      {% if c.mac in paused %}
+      <span class="status pending_approval">paused</span>
+      <form method="post" action="/actions/{{ paused[c.mac] }}/undo" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small tonal">Resume</button></form>
+      {% else %}<a href="/actions?type=pause_client&mac={{ c.mac }}">Pause…</a>{% endif %}
+    </td>{% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="9" class="muted">No clients reported yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</section>
+<p class="muted small">Per-client traffic needs a NetFlow collector; see docs/RUNBOOK.md.</p>
+{% endblock %}

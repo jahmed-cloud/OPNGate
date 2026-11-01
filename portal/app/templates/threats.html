@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Threats</h1><span class="muted">firewall data updated {{ updated | ago }}</span></div>
+<p class="banner warn">WAF deployment and engine mode are unverified. Coraza must run at the edge; DetectionOnly records matches without blocking. Shipper contact: {{ waf_last_seen | ts }} UTC.</p>
+{% if legacy_waf_count %}<p class="muted">{{ legacy_waf_count }} legacy counts excluded: older counters could include application and authentication errors.</p>{% endif %}
+<section class="card"><h2>Confirmed WAF events · seven UTC days</h2><p class="muted small">{{ waf_days[0].day }} 00:00 UTC through today {{ now | ts }}. Current day is partial.</p>{{ waf_chart(waf_days) }}<p class="muted">{{ waf_totals.blocked }} interrupted transactions · {{ waf_totals.detected }} non-interrupted rule matches. Missing logs cannot be distinguished from zero events.</p></section>
+
+<div class="tiles">
+  {% for name, count in (data.tables or {}).items() %}
+  <div class="tile"><span class="label">{{ name }}</span><span class="value">{{ count }}</span><span class="sub">pf table entries</span></div>
+  {% endfor %}
+  <div class="tile"><span class="label">CrowdSec bans</span><span class="value">{{ (data.crowdsec or {}).active_bans or 0 }}</span><span class="sub">active decisions</span></div>
+  <div class="tile"><span class="label">IDS alerts 24 h</span><span class="value">{{ ids_count }}</span><span class="sub">Suricata · latest 100 shown</span></div>
+</div>
+
+<div class="grid2">
+  <section class="card"><h2>Banned attackers by country</h2>
+    <table><tbody>{% for cc, n in by_country %}<tr><td>{{ cc or '??' }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td class="muted">No data.</td></tr>{% endfor %}</tbody></table></section>
+  <section class="card"><h2>Bans by scenario</h2>
+    <table><tbody>{% for s, n in by_scenario %}<tr><td class="mono">{{ s }}</td><td class="num">{{ n }}</td></tr>
+    {% else %}<tr><td class="muted">No data.</td></tr>{% endfor %}</tbody></table></section>
+</div>
+
+<section class="card"><h2>WAF hits per site, 7 days</h2>
+  <table><thead><tr><th>Site</th><th>Detected</th><th>Blocked</th></tr></thead><tbody>
+  {% for host, k in waf_hosts.items() %}<tr><td class="mono">{{ host }}</td><td class="num">{{ k.detected }}</td><td class="num">{{ k.blocked }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No WAF hits recorded.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+
+<section class="card scroll"><h2>IDS alerts, 24 hours</h2>
+  <table><thead><tr><th>Time</th><th>Severity</th><th>Alert</th></tr></thead><tbody>
+  {% for e in ids %}<tr><td>{{ e.ts | ts }}</td><td><span class="sev {{ e.severity }}">{{ e.severity }}</span></td><td>{{ e.title }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

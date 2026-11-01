@@ -1,0 +1,10 @@
+# Copy to home-whitelist.yaml (git-ignored) and put your own address in.
+# Never raise alerts (so never ban) for your own static public IP. Using the sites from home shows up
+# as this address, so a few failed logins or odd requests could otherwise lock you out.
+# Keep identical to deploy/edge/crowdsec/parsers/home-whitelist.yaml.
+name: local/home-whitelist
+description: "Home static public IP"
+whitelist:
+  reason: "home static IP"
+  ip:
+    - "203.0.113.10"    # replace with your static public IP

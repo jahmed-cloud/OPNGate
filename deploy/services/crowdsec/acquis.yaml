@@ -1,0 +1,4 @@
+filenames:
+  - /var/log/portal-data/logs/auth.log
+labels:
+  type: portal-auth

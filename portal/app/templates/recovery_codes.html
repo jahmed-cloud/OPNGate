@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card narrow">
+  <h1>New recovery codes</h1>
+  <p>Each code works once, in place of the authenticator code. Old codes no longer work. This is the only time they are shown.</p>
+  <ol class="codes mono">{% for c in codes %}<li>{{ c }}</li>{% endfor %}</ol>
+  <a href="/security">Done</a>
+</section>
+{% endblock %}

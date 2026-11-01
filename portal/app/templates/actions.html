@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Actions</h1></div>
+{% if error %}<p class="banner bad">{{ error }}</p>{% endif %}
+{% if not has_key %}<p class="banner warn">Actions must be signed with a security key. Add one under <a href="/security">Security</a>, then export keys to the firewall.</p>{% endif %}
+
+<section class="card">
+  <h2>New action</h2>
+  <p class="muted small">Each action is signed by your security key and checked by the firewall itself before it runs. Unapproved requests expire after 10 minutes.</p>
+  <form method="post" action="/actions/new" class="stack" id="action-form">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Action
+      <select name="type" id="action-type">
+        {% for k, label in labels.items() %}<option value="{{ k }}" {{ 'selected' if prefill.type == k }}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label data-for="block_ip unblock_ip">IP or CIDR <input name="cidr" value="{{ prefill.cidr or '' }}" placeholder="203.0.113.7 or 203.0.113.0/24"></label>
+    <label data-for="block_ip pause_client">Minutes <span class="muted">(pause: 0 = until resumed)</span> <input name="minutes" type="number" min="0" max="10080" value="{{ prefill.minutes or 60 }}"></label>
+    <label data-for="wg_disconnect">Interface <input name="interface" value="{{ prefill.interface or 'wg0' }}"></label>
+    <label data-for="wg_disconnect">Peer public key
+      <select name="public_key">{% for p in vpn %}<option value="{{ p.public_key }}" {{ 'selected' if prefill.public_key == p.public_key }}>{{ p.name or '' }} {{ p.public_key[:16] }}…</option>{% endfor %}</select></label>
+    <label data-for="pause_client resume_client">Client
+      <select name="mac">{% for c in clients %}<option value="{{ c.mac }}" {{ 'selected' if prefill.mac == c.mac }}>{{ c.hostname or '(no name)' }} · {{ c.ip or '' }} · {{ c.mac }}</option>{% endfor %}</select></label>
+    <label data-for="breakglass">State <select name="enable"><option value="1">Enable</option><option value="0">Disable</option></select></label>
+    <button class="primary" {{ 'disabled' if not has_key }}>Prepare for signing</button>
+  </form>
+</section>
+
+<section class="card scroll">
+  <h2>Recent</h2>
+  <table><thead><tr><th>Created</th><th>By</th><th>Action</th><th>Parameters</th><th>Status</th><th></th></tr></thead><tbody>
+  {% for a in rows %}
+  <tr><td>{{ a.created_at | ts }}</td><td>{{ a.created_by }}</td><td><a href="/actions/{{ a.id }}">{{ labels[a.type] }}</a></td>
+    <td class="mono small">{{ a.params }}</td>
+    <td><span class="status {{ a.status }}">{{ 'in effect' if a.id in active else a.status | replace('_', ' ') }}</span></td>
+    <td>{% if a.id in active or (a.status == 'done' and a.type == 'breakglass') %}
+      <form method="post" action="/actions/{{ a.id }}/undo"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small tonal">Undo</button></form>
+    {% endif %}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">No actions yet.</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endblock %}

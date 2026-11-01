@@ -1,0 +1,17 @@
+.env
+deploy/pki/out/
+portal/.venv/
+portal/data/
+__pycache__/
+*.pyc
+.tmp/
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+*.key
+*.p12
+*.pfx
+
+# Real home IP; commit only the .example
+deploy/*/crowdsec/parsers/home-whitelist.yaml

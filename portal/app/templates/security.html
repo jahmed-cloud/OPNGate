@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>Security</h1></div>
+{% if error %}<p class="banner bad">{{ error }}</p>{% endif %}
+{% if flash %}<p class="banner ok">{{ flash }}</p>{% endif %}
+<p class="error hidden" id="wa-error" role="alert"></p>
+
+<section class="card">
+  <h2>Confirm it's you</h2>
+  {% if session.mfa_fresh %}
+  <p class="ok-text">Confirmed. Changes below are unlocked for 5 minutes.</p>
+  {% else %}
+  <p class="muted">Changing sign-in methods needs a fresh check.</p>
+  <div class="row">
+    <button class="primary" id="stepup-passkey">Use security key</button>
+    <form method="post" action="/security/stepup/totp" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="TOTP code" required maxlength="6">
+      <button>Confirm</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Security keys and passkeys <span class="muted">{{ creds | length }}</span></h2>
+  {% if creds | length < 2 %}<p class="banner warn">Register at least two: one for daily use, one kept offline as a spare.</p>{% endif %}
+  <table><thead><tr><th>Name</th><th>Added</th><th>Last used</th><th></th></tr></thead><tbody>
+  {% for c in creds %}
+  <tr><td>{{ c.name }}</td><td>{{ c.created_at | ts }}</td><td>{{ c.last_used_at | ago }}</td>
+    <td>{% if session.mfa_fresh %}<form method="post" action="/security/passkey/{{ c.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">None yet.</td></tr>{% endfor %}
+  </tbody></table>
+  {% if session.mfa_fresh %}
+  <div class="row"><input id="key-name" placeholder="Name, e.g. YubiKey 5C (spare)" maxlength="60"><button class="primary" id="register-key">Add security key</button></div>
+  {% endif %}
+  {% if session.is_operator %}<p class="muted small">After adding or removing a key, re-export keys to the firewall from the portal host (<code>python -m app.cli export-keys</code>) so control actions accept it.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Authenticator app (TOTP)</h2>
+  <p>{{ 'Configured.' if user.totp_secret_enc else 'Not configured.' }}</p>
+  {% if session.mfa_fresh %}
+  <form method="post" action="/security/totp/begin"><input type="hidden" name="csrf" value="{{ csrf }}"><button>{{ 'Replace' if user.totp_secret_enc else 'Set up' }} authenticator</button></form>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Recovery codes</h2>
+  <p>{{ codes_left }} of 10 unused.</p>
+  {% if session.mfa_fresh %}
+  <form method="post" action="/security/recovery"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Generate new codes</button></form>
+  {% endif %}
+</section>
+
+{% if session.mfa_fresh %}
+<section class="card">
+  <h2>Password</h2>
+  <form method="post" action="/security/password" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Current <input type="password" name="current" autocomplete="current-password" required></label>
+    <label>New (14+ characters) <input type="password" name="new" autocomplete="new-password" minlength="14" required></label>
+    <button>Change password</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

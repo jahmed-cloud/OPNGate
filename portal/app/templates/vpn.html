@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head"><h1>WireGuard</h1><span class="muted">updated {{ updated | ago }}</span></div>
+<section class="card scroll">
+<table>
+  <thead><tr><th></th><th>Peer</th><th>Interface</th><th>Endpoint</th><th>Allowed IPs</th><th>Last handshake</th>{% if session.is_operator %}<th></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for p in peers %}
+  {% set live = p.last_handshake and (now - p.last_handshake) < 180 %}
+  <tr>
+    <td><span class="dot {{ 'on' if live else 'off' }}"></span></td>
+    <td><strong>{{ p.name or "Unnamed peer" }}</strong><br><span class="mono small muted">{{ p.public_key[:12] }}…</span></td>
+    <td class="mono">{{ p.interface }}</td>
+    <td class="mono">{{ p.endpoint or '—' }}</td>
+    <td class="mono small">{{ p.allowed_ips }}</td>
+    <td>{{ p.last_handshake | ago }}</td>
+    {% if session.is_operator %}<td>{% if live %}<a href="/actions?type=wg_disconnect&interface={{ p.interface }}&public_key={{ p.public_key | urlencode }}">Disconnect…</a>{% endif %}</td>{% endif %}
+  </tr>
+  {% else %}<tr><td colspan="7" class="muted">No peers reported.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</section>
+{% endblock %}

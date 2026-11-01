@@ -1,0 +1,57 @@
+# Parked sites: removed from the Caddyfile on 2026-11-01 because their upstream was down.
+# Caddy does not load this file. To bring a site back, start its upstream, paste its block into
+# the Caddyfile above the catch-all, add its ip:port to UPSTREAMS in /etc/gw-hostfw.env, and reload.
+
+# Behind the portal login
+http://ollama.{$DOMAIN} {
+	import admin_app 10.10.0.100:11434  # Ollama API has no authentication at all
+}
+http://myai.{$DOMAIN} {
+	import admin_app 10.10.0.100:3001
+}
+
+# Apps with their own login, used directly by people or other apps.
+http://drive.{$DOMAIN} {
+	import app 10.10.0.20:8080
+}
+http://ai.{$DOMAIN}, http://omniroute.{$DOMAIN} {
+	import app 10.10.0.22:20128
+}
+http://ehp.{$DOMAIN}, http://entradesk.{$DOMAIN} {
+	import app 10.10.0.22:8000
+}
+http://hrm.{$DOMAIN} {
+	import app 10.10.0.22:4173
+}
+http://motohub.{$DOMAIN} {
+	import app 10.10.0.22:5000
+}
+http://eguard.{$DOMAIN} {
+	import app 10.10.0.41:3000
+}
+http://entraguard.{$DOMAIN} {
+	import app 10.10.0.51:3000
+}
+http://arg.{$DOMAIN} {
+	import app 10.10.0.42:3000
+}
+http://azo.{$DOMAIN} {
+	import app 10.10.0.43:8080
+}
+
+# Public sites on your other domains.
+http://api.terait.io {
+	import app 10.10.0.54:4000
+}
+http://verify.terait.io {
+	import app 10.10.0.54:3000
+}
+http://terait.io {
+	import app_tls 10.10.0.31:443
+}
+http://old.learncloud.guru {
+	import app_tls 10.10.0.32:443
+}
+http://xtractinfo.com {
+	import app_tls 10.10.0.33:443
+}

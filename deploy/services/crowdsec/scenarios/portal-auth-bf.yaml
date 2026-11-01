@@ -1,0 +1,19 @@
+# 10 failed portal sign-ins from one IP (leaking one per minute) -> ban.
+# The ban reaches Caddy (bouncer, real client IP) and the OPNsense pf table (bouncer on the firewall).
+type: leaky
+name: local/portal-auth-bf
+description: "Brute force against the gateway portal login"
+filter: "evt.Meta.log_type == 'portal_auth_failed'"
+groupby: evt.Meta.source_ip
+capacity: 9
+leakspeed: 60s
+blackhole: 5m
+labels:
+  service: portal
+  confidence: 3
+  spoofable: 0
+  classification:
+    - attack.T1110
+  label: "Portal brute force"
+  behavior: "http:bruteforce"
+  remediation: true

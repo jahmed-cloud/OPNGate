@@ -1,0 +1,79 @@
+# Raspberry Pi 4 (services): portal, ingest API, CrowdSec central API.
+# Ports, all bound to the Pi 4's IP:
+#   9443  portal (HTTPS)        <- only the Pi 5 (Caddy, WAF shipper)
+#   9444  ingest (mutual TLS)   <- only the firewall agent
+#   9080  CrowdSec Local API    <- only the Pi 5 (agent + bouncer) and the OPNsense bouncer
+# Sources are enforced by deploy/hostfw on the Pi 4 today (flat LAN), and by OPNsense rules once VLANs exist.
+
+name: gw-services
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+
+volumes:
+  portal-data:
+  crowdsec-db:
+  crowdsec-config:
+
+x-portal: &portal
+  build: ../../portal
+  env_file: .env
+  volumes:
+    - portal-data:/data
+    - ../pki/out/services.crt:/pki/services.crt:ro
+    - ../pki/out/services.key:/pki/services.key:ro
+    - ../pki/out/ingest-ca.pem:/pki/ingest-ca.pem:ro
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+services:
+  portal:
+    <<: *portal
+    environment:
+      PORTAL_RP_ID: cg.${DOMAIN}
+      PORTAL_ORIGIN: https://cg.${DOMAIN}
+      PORTAL_COOKIE_DOMAIN: ${DOMAIN}
+      # Docker's port publishing keeps the real source IP, so this is the Pi 5's address.
+      PORTAL_TRUSTED_PROXIES: ${EDGE_HOST_IP:?set EDGE_HOST_IP}/32
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 9443 --no-proxy-headers
+      --ssl-certfile /pki/services.crt --ssl-keyfile /pki/services.key
+    ports:
+      - "${SERVICES_HOST_IP:?set SERVICES_HOST_IP}:9443:9443"
+
+  portal-ingest:
+    <<: *portal
+    environment:
+      PORTAL_RP_ID: cg.${DOMAIN}
+      PORTAL_ORIGIN: https://cg.${DOMAIN}
+    command: >
+      uvicorn app.ingest:ingest_app --host 0.0.0.0 --port 9444
+      --ssl-certfile /pki/services.crt --ssl-keyfile /pki/services.key
+      --ssl-ca-certs /pki/ingest-ca.pem --ssl-cert-reqs 2
+    ports:
+      - "${SERVICES_HOST_IP}:9444:9444"
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.6.8
+    environment:
+      # Central API, plus a local agent for the portal's auth log.
+      COLLECTIONS: crowdsecurity/linux
+      BOUNCER_KEY_caddy: ${CROWDSEC_CADDY_KEY:?set CROWDSEC_CADDY_KEY}
+      BOUNCER_KEY_opnsense: ${CROWDSEC_OPNSENSE_KEY:?set CROWDSEC_OPNSENSE_KEY}
+    volumes:
+      - crowdsec-db:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./crowdsec/parsers/portal-auth.yaml:/etc/crowdsec/parsers/s01-parse/portal-auth.yaml:ro
+      - ./crowdsec/parsers/home-whitelist.yaml:/etc/crowdsec/parsers/s02-enrich/home-whitelist.yaml:ro
+      - ./crowdsec/scenarios/portal-auth-bf.yaml:/etc/crowdsec/scenarios/portal-auth-bf.yaml:ro
+      - portal-data:/var/log/portal-data:ro
+    ports:
+      - "${SERVICES_HOST_IP}:9080:8080"
+    restart: unless-stopped

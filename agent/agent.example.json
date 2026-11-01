@@ -1,0 +1,50 @@
+{
+  "portal_url": "https://10.10.0.22:9444",
+  "ca_file": "/usr/local/etc/fw-agent/ingest-ca.pem",
+  "cert_file": "/usr/local/etc/fw-agent/agent.crt",
+  "key_file": "/usr/local/etc/fw-agent/agent.key",
+  "state_file": "/var/db/fw-agent/state.json",
+  "interval": 30,
+  "action_poll": 15,
+
+  "wan_interface": "igc0",
+  "gateway_name": "WAN_GW",
+  "ping_target": "1.1.1.1",
+  "segments": {
+    "igc0": "WAN",
+    "igc1": "WiFi",
+    "igc2": "LAN",
+    "igc3": "MGMT",
+    "wg0": "VPN",
+    "rtwn0_wlan1": "Breakglass"
+  },
+  "dhcp_leases": ["/var/db/dnsmasq.leases", "/var/db/kea/kea-leases4.csv", "/var/dhcpd/var/db/dhcpd.leases"],
+  "pf_tables": ["crowdsec_blacklists", "crowdsec6_blacklists", "BLOCK_FIREHOL_L1", "portal_block", "portal_paused"],
+  "suricata_eve": "/var/log/suricata/eve.json",
+  "event_files": ["/var/log/portal-events.jsonl"],
+  "wg_names": {
+    "REPLACE_WITH_PEER_PUBLIC_KEY=": "Phone"
+  },
+
+  "opnsense_api": {
+    "url": "https://127.0.0.1",
+    "key": "",
+    "secret": "",
+    "verify_tls": false
+  },
+
+  "actions": {
+    "enabled": false,
+    "trusted_keys_file": "/usr/local/etc/fw-agent/operator_keys.json",
+    "rp_id": "cg.jahmed.cloud",
+    "origin": "https://cg.jahmed.cloud",
+    "allowed": ["block_ip", "unblock_ip", "wg_disconnect", "pause_client", "resume_client", "backup_config"],
+    "block_table": "portal_block",
+    "pause_table": "portal_paused",
+    "protected_cidrs": [],
+    "protected_macs": [],
+    "breakglass_interface": "",
+    "backup_dir": "/var/backups/fw-agent",
+    "backup_passphrase_file": "/usr/local/etc/fw-agent/backup.pass"
+  }
+}
