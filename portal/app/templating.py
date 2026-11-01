@@ -388,11 +388,12 @@ def flow_layout(segments: list) -> int:
         shown = s.get("devices") or []
         s["compact"] = compact = len(shown) > FLOW_COMPACT_AFTER
         row = FLOW_ROW_COMPACT if compact else FLOW_ROW
-        rows = max(1, len(shown) + (1 if s.get("idle") else 0) + (1 if s.get("more") else 0))
+        toggle = bool(s.get("rest") or s.get("all_open"))  # "Show all" under the short list, "Show fewer" under the full one
+        rows = max(1, len(shown) + toggle + (1 if s.get("more") else 0))
         for i, d in enumerate(shown):
             d["y"] = y + row * i + row / 2
             d["card_h"] = row - 4 if compact else 40
-        s["idle_y"] = y + row * len(shown) + row / 2  # the idle toggle follows the device cards
+        s["toggle_y"] = y + row * len(shown) + row / 2  # the toggle follows the device cards
         s["more_y"] = y + row * (rows - 1) + row / 2
         # A long list hangs from its network box instead of centring the box halfway down it.
         s["y"] = y + 34 if compact else y + rows * row / 2
@@ -459,7 +460,7 @@ def _flow_compact(s) -> str:
     e = html.escape
     shown = s["devices"]
     sy, tx = s["y"], FLOW_TRUNK_X
-    end = s["more_y"] if s.get("more") else s["idle_y"] if s.get("idle") else shown[-1]["y"]
+    end = s["more_y"] if s.get("more") else s["toggle_y"] if s.get("rest") or s.get("all_open") else shown[-1]["y"]
     out = [f'<path class="lane trunk" d="M560,{sy} H{tx} V{end}"/>']
     for d in shown:
         dy, paused = d["y"], bool(d.get("paused"))
@@ -546,15 +547,15 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
                          f'<text class="sub" x="671" y="{dy + 13}"{_fit(plain, 10.5, 199)}>{speeds}</text>'
                          f'<text x="870" y="{dy - 3}" text-anchor="end"{_fit(tag_text, 10.5, 120)}>{tag_svg}</text></g>')
         mx, mw, mh = (600, 295, FLOW_ROW_COMPACT - 4) if s.get("compact") else (630, 250, 34)
-        if s.get("open", True) and s.get("idle"):
-            iy, n = s["idle_y"], s["idle"]
-            lane = f"M{FLOW_TRUNK_X},{iy} H600" if s.get("compact") else f"M560,{sy} C595,{sy} 595,{iy} 630,{iy}"
-            what = f'{"Hide" if s.get("idle_open") else "Show"} {n} idle device{"s" if n != 1 else ""}'
+        if s.get("open", True) and (s.get("rest") or s.get("all_open")):
+            ty, count = s["toggle_y"], s.get("online", 0)
+            lane = f"M{FLOW_TRUNK_X},{ty} H600" if s.get("compact") else f"M560,{sy} C595,{sy} 595,{ty} 630,{ty}"
+            what = "Show only the busiest" if s.get("all_open") else f'Show all {count} devices (+{s["rest"]})'
             parts.append(f'<path class="lane devices" d="{lane}"/>')
-            parts.append(f'<a class="seg-toggle idle-toggle" href="#" data-segment="{e(s["name"])}~idle" role="button" '
-                         f'aria-expanded="{"true" if s.get("idle_open") else "false"}"><g class="node more idle"><title>No traffic right now</title>'
-                         f'<rect x="{mx}" y="{iy - mh / 2}" width="{mw}" height="{mh}" rx="10"/>'
-                         f'<text class="sub" x="{mx + 16}" y="{iy + 4}">{what} on {e(s["name"])}</text></g></a>')
+            parts.append(f'<a class="seg-toggle all-toggle" href="#" data-segment="{e(s["name"])}~all" role="button" '
+                         f'aria-expanded="{"true" if s.get("all_open") else "false"}"><g class="node more">'
+                         f'<rect x="{mx}" y="{ty - mh / 2}" width="{mw}" height="{mh}" rx="10"/>'
+                         f'<text class="sub" x="{mx + 16}" y="{ty + 4}">{what}</text></g></a>')
         if s.get("more"):
             my = s["more_y"]
             lane = f"M{FLOW_TRUNK_X},{my} H600" if s.get("compact") else f"M560,{sy} C595,{sy} 595,{my} 630,{my}"
@@ -567,7 +568,7 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
                 parts.append(f'<path class="lane devices" d="M560,{sy} C580,{sy} 580,{sy} 600,{sy}"/>')
             parts.append(f'<text class="sub hint" x="610" y="{sy + 4}">{count} device{"s" if count != 1 else ""} online'
                          f'{" · click the network to show them" if count else ""}</text>')
-        elif not s.get("devices") and not s.get("more") and not s.get("idle"):
+        elif not s.get("devices") and not s.get("more") and not s.get("rest"):
             parts.append(f'<text class="sub" x="636" y="{sy + 4}">No devices online</text>')
         is_open = s.get("open", True)
         network_kind = interface_icons.kind(s["name"], s.get("iface"))

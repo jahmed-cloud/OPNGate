@@ -32,10 +32,11 @@ def _like(term: str) -> str:
 
 DEVICE_ACTIONS = ("pause_client", "resume_client", "limit_client", "unlimit_client", "block_domains", "unblock_domains")
 NETWORK_ACTIONS = ("block_network", "unblock_network")
-FLOW_DEVICES_PER_SEGMENT = 150  # bounded; busy networks switch to compact rows (templating.flow_layout)
+FLOW_TOP_DEVICES = 8  # an open network shows its busiest few; "Show all" lists the rest
+FLOW_DEVICES_PER_SEGMENT = 150  # bounded; long lists switch to compact rows (templating.flow_layout)
 NAME_MAX = 40
 # Below this much traffic a device counts as idle on the flow map, unless a policy applies to it (paused, capped
-# or blocking sites: those stay in view).
+# or blocking sites), which keeps it in the short view.
 FLOW_IDLE_BPS = 2_000
 FLOW_TRAFFIC = "(COALESCE(c.down_bps, 0) + COALESCE(c.up_bps, 0))"
 FLOW_ACTIVE = f"({FLOW_TRAFFIC} >= ? OR c.paused = 1 OR c.speed_limit IS NOT NULL OR c.blocked_domains IS NOT NULL)"
@@ -73,9 +74,9 @@ def _flow_open(request: Request) -> set:
 
 
 def _flow_data(gw: dict, latest, open_segments=frozenset({"*"})) -> tuple:
-    """On an inside interface the firewall's transmit is the devices' download. Busiest devices come first; quiet ones
-    fold into one idle row ("<network>~idle" in flow_open shows them). The order is re-read on each map refresh
-    (30 s), not on every live rate, so rows do not jump while being read. Lists are bounded per segment."""
+    """On an inside interface the firewall's transmit is the devices' download. An open network shows its few busiest
+    devices; "<network>~all" in flow_open shows every online device (busiest first, then idle ones by name). The
+    order is re-read on each map refresh (30 s), not on every live rate, so rows do not jump while being read."""
     _, interfaces = db.get_snapshot("interfaces", [])
     wan, segments = {}, []
     counts = {r["segment"]: r["n"] for r in db.q("SELECT segment, COUNT(*) AS n FROM clients WHERE online=1 GROUP BY segment")}
@@ -85,29 +86,27 @@ def _flow_data(gw: dict, latest, open_segments=frozenset({"*"})) -> tuple:
             continue
         name = interface.get("segment") or interface.get("name")
         is_open = "*" in open_segments or name in open_segments
-        idle_open = f"{name}~idle" in open_segments
+        all_open = f"{name}~all" in open_segments
         online = counts.get(interface.get("segment"), 0)
-        shown, idle = [], 0
+        shown = []
         if is_open:
-            rows = db.q(f"{devices.CLIENTS} WHERE c.online=1 AND c.segment=? AND {FLOW_ACTIVE} "
-                        f"ORDER BY {FLOW_TRAFFIC} DESC, c.mac LIMIT ?", interface.get("segment"), FLOW_IDLE_BPS, FLOW_DEVICES_PER_SEGMENT)
-            active = len(rows) if len(rows) < FLOW_DEVICES_PER_SEGMENT else db.one(
-                f"SELECT COUNT(*) AS n FROM clients c WHERE c.online=1 AND c.segment=? AND {FLOW_ACTIVE}", interface.get("segment"), FLOW_IDLE_BPS)["n"]
-            idle = max(0, online - active)
-            if idle_open and idle and len(rows) < FLOW_DEVICES_PER_SEGMENT:
-                rows += db.q(f"{devices.CLIENTS} WHERE c.online=1 AND c.segment=? AND NOT {FLOW_ACTIVE} "
-                             f"ORDER BY lower(COALESCE(l.name, c.hostname, c.ip, c.mac)), c.mac LIMIT ?",
-                             interface.get("segment"), FLOW_IDLE_BPS, FLOW_DEVICES_PER_SEGMENT - len(rows))
+            # The short view lists only devices with traffic or a policy; the full one adds the idle ones after them.
+            only_active = "" if all_open else f" AND {FLOW_ACTIVE}"
+            rows = db.q(f"{devices.CLIENTS} WHERE c.online=1 AND c.segment=?{only_active} "
+                        f"ORDER BY {FLOW_ACTIVE} DESC, {FLOW_TRAFFIC} DESC, lower(COALESCE(l.name, c.hostname, c.ip, c.mac)), c.mac LIMIT ?",
+                        interface.get("segment"), *([] if all_open else [FLOW_IDLE_BPS]), FLOW_IDLE_BPS,
+                        FLOW_DEVICES_PER_SEGMENT if all_open else FLOW_TOP_DEVICES)
             for row in rows:
                 c = _client(row)
                 c["label"] = devices.label(c)
                 shown.append(c)
-        hidden_idle = 0 if idle_open else idle
+        hidden = max(0, online - len(shown)) if is_open else 0
         segments.append({
             "name": name, "iface": interface.get("name"), "open": is_open,
             "down_bps": interface.get("tx_bps"), "up_bps": interface.get("rx_bps"),
-            "online": online, "devices": shown, "idle": idle, "idle_open": idle_open,
-            "more": max(0, online - len(shown) - hidden_idle) if is_open else 0,
+            "online": online, "devices": shown, "all_open": all_open,
+            # Short view: the rest sit behind "Show all". Full view: only what is past the cap (-> Clients page).
+            "rest": 0 if all_open else hidden, "more": hidden if all_open else 0,
         })
     return {**gw, "latency_ms": latest["latency_ms"] if latest else gw.get("latency_ms")}, wan, segments
 

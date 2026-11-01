@@ -588,8 +588,8 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   const name = seg.dataset.segment;
   const names = document.querySelectorAll(".seg-toggle[data-segment]");
-  // "*" means every network open; idle lists ("<network>~idle") stay folded unless asked for.
-  let open = flowOpen() === "*" ? [...names].map((n) => n.dataset.segment).filter((n) => !n.endsWith("~idle")) : flowOpen().split(",").filter(Boolean);
+  // "*" means every network open, each showing its busiest devices; full lists ("<network>~all") only when asked for.
+  let open = flowOpen() === "*" ? [...names].map((n) => n.dataset.segment).filter((n) => !n.endsWith("~all")) : flowOpen().split(",").filter(Boolean);
   open = open.includes(name) ? open.filter((n) => n !== name) : [...open, name];
   setFlowOpen(open.join(","));
 });
