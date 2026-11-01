@@ -368,7 +368,7 @@ def _flow_pair(x1, y1, x2, y2, down_bps, up_bps, extra="") -> str:
     return "".join(out)
 
 
-FLOW_ROW, FLOW_GAP, FLOW_TOP, FLOW_WIDTH = 50, 22, 22, 900  # device cards span x 630-880 (70%-97.8%)
+FLOW_ROW, FLOW_GAP, FLOW_TOP, FLOW_WIDTH = 50, 26, 26, 900  # device cards span x 630-880 (70%-97.8%)
 
 
 def flow_layout(segments: list) -> int:
@@ -388,6 +388,18 @@ def flow_layout(segments: list) -> int:
             d["top_pct"] = round((d["y"] - 20) / height * 100, 3)
             d["h_pct"] = round(40 / height * 100, 3)
     return height
+
+
+def _fit(text: str, size: float, room: float) -> str:
+    """textLength attributes that squeeze a line into its box when the rough width estimate says it would
+    overflow (SVG text never wraps or clips by itself)."""
+    return f' textLength="{room:.0f}" lengthAdjust="spacingAndGlyphs"' if len(text) * size * 0.6 > room else ""
+
+
+def _rates(down, up, sep="   ") -> str:
+    """↓ x ↑ y with coloured arrows (download orange, upload blue)."""
+    return (f'<tspan class="arr down">↓</tspan> {html.escape(fmt_bps(down))}{sep}'
+            f'<tspan class="arr up">↑</tspan> {html.escape(fmt_bps(up))}')
 
 
 def _short(text, n) -> str:
@@ -438,18 +450,23 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
             if sites or cats:
                 what = [f"{sites} site{'s' if sites != 1 else ''}"] if sites else []
                 what += [f"{cats} list{'s' if cats != 1 else ''}"] if cats else []
-                tags.append(("sites", " + ".join(what) + " blocked"))
+                tags.append(("sites", " + ".join(what)))
+            tag_text = " · ".join(v for _, v in tags)
             tag_svg = "".join(f'<tspan class="tag {k}">{" · " if i else ""}{e(v)}</tspan>' for i, (k, v) in enumerate(tags))
-            speeds = "paused" if paused else f'↓ {fmt_bps(d.get("down_bps"))}   ↑ {fmt_bps(d.get("up_bps"))}'
+            # Card text runs from x=671 to 870; the name gets what the tag leaves (about 7 px per character).
+            name_room = 199 - (len(tag_text) * 10.5 * 0.6 + 10 if tags else 0)
+            name = _short(d["label"], max(6, int(name_room / 6.8)))
+            plain = "paused" if paused else f'↓ {fmt_bps(d.get("down_bps"))}   ↑ {fmt_bps(d.get("up_bps"))}'
+            speeds = "paused" if paused else _rates(d.get("down_bps"), d.get("up_bps"))
             what = devices.kind(d)
             parts.append(f'<g class="node device {kind}"><title>{e(d["label"])} · {e(devices.LABELS[what])} · {e(d.get("ip") or "")} · {e(d["mac"])}</title>'
                          f'<rect x="630" y="{dy - 20}" width="250" height="40" rx="10"/>'
                          f'<rect class="kind-bg" x="637" y="{dy - 13}" width="26" height="26" rx="7"/>'
                          f'<path class="kind" transform="translate(641 {dy - 9}) scale(.75)" d="{devices.ICONS[what]}"/>'
                          f'<circle class="dot" cx="661" cy="{dy + 11}" r="3.5"/>'
-                         f'<text class="title" x="671" y="{dy - 3}">{e(_short(d["label"], 20))}</text>'
-                         f'<text class="sub" x="671" y="{dy + 13}">{e(speeds)}</text>'
-                         f'<text x="870" y="{dy - 3}" text-anchor="end">{tag_svg}</text></g>')
+                         f'<text class="title" x="671" y="{dy - 3}">{e(name)}</text>'
+                         f'<text class="sub" x="671" y="{dy + 13}"{_fit(plain, 10.5, 199)}>{speeds}</text>'
+                         f'<text x="870" y="{dy - 3}" text-anchor="end"{_fit(tag_text, 10.5, 120)}>{tag_svg}</text></g>')
         if s.get("more"):
             my = s["more_y"]
             parts.append(f'<path class="lane devices" d="M560,{sy} C595,{sy} 595,{my} 630,{my}"/>')
@@ -466,10 +483,13 @@ def flow_map(gw: dict, wan: dict, segments: list, height: int = 0) -> Markup:
         is_open = s.get("open", True)
         parts.append(f'<a class="seg-toggle" href="#" data-segment="{e(s["name"])}" role="button" aria-expanded="{"true" if is_open else "false"}" '
                      f'aria-label="{"Hide" if is_open else "Show"} devices on {e(s["name"])}">'
-                     f'<g class="node segment{" open" if is_open else ""}"><rect x="420" y="{sy - 28}" width="140" height="56" rx="14"/>'
-                     f'<text class="title" x="434" y="{sy - 5}">{e(_short(s["name"], 10))} <tspan class="count">{count}</tspan></text>'
-                     f'<path class="chevron" d="{"M538 " + str(sy - 10) + " l5 5 5 -5" if is_open else "M540 " + str(sy - 13) + " l5 5 -5 5"}"/>'
-                     f'<text class="sub" x="434" y="{sy + 15}">↓ {e(fmt_bps(s.get("down_bps")))}  ↑ {e(fmt_bps(s.get("up_bps")))}</text></g></a>')
+                     f'<g class="node segment{" open" if is_open else ""}"><rect x="420" y="{sy - 34}" width="140" height="68" rx="14"/>'
+                     f'<text class="title" x="434" y="{sy - 11}">{e(_short(s["name"], 10))} <tspan class="count">{count}</tspan></text>'
+                     f'<path class="chevron" d="{"M538 " + str(sy - 18) + " l5 5 5 -5" if is_open else "M540 " + str(sy - 21) + " l5 5 -5 5"}"/>'
+                     f'<text class="sub rate-line" x="434" y="{sy + 8}"{_fit("↓ " + fmt_bps(s.get("down_bps")), 11.5, 112)}>'
+                     f'<tspan class="arr down">↓</tspan> {e(fmt_bps(s.get("down_bps")))}</text>'
+                     f'<text class="sub rate-line" x="434" y="{sy + 24}"{_fit("↑ " + fmt_bps(s.get("up_bps")), 11.5, 112)}>'
+                     f'<tspan class="arr up">↑</tspan> {e(fmt_bps(s.get("up_bps")))}</text></g></a>')
     if not segments:
         parts.append(f'<text class="sub" x="440" y="{mid + 5}">Waiting for the firewall agent…</text>')
     parts.append("</svg>")

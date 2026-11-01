@@ -554,3 +554,10 @@ svg[data-tips] { cursor: crosshair; }
 .flowmap .sub.hint { fill: var(--muted); }
 .flow-all { margin-left: 10px; height: 28px; padding: 0 10px; font-size: 12px; }
 .flowmap a, .flowmap a:hover { text-decoration: none; }
+
+/* Coloured rate arrows on the flow map; network boxes show download and upload on separate lines. */
+.flowmap .arr { font-weight: 700; }
+.flowmap .arr.down { fill: var(--primary); }
+.flowmap .arr.up { fill: var(--secondary); }
+.flowmap .node.segment .rate-line { font-size: 11.5px; fill: var(--text); font-variant-numeric: tabular-nums; }
+.stale-flow .flowmap .arr { fill: var(--muted); }
