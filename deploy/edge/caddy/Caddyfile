@@ -77,7 +77,7 @@
 	}
 }
 
-cg.{$DOMAIN} {    # WAF-OPNsense portal
+waf.{$DOMAIN} {    # WAF-OPNsense portal
 	import access_log
 	route {
 		import cf_only
@@ -91,7 +91,6 @@ cg.{$DOMAIN} {    # WAF-OPNsense portal
 		}
 	}
 }
-
 # ---- Site templates ----
 # app:        WAF + bans. For sites the public or your apps/phones talk to directly.
 # admin_app:  WAF + bans + portal login (FIDO2/TOTP). For consoles only you use.

@@ -36,8 +36,8 @@
   "actions": {
     "enabled": false,
     "trusted_keys_file": "/usr/local/etc/fw-agent/operator_keys.json",
-    "rp_id": "cg.jahmed.cloud",
-    "origin": "https://cg.jahmed.cloud",
+    "rp_id": "waf.jahmed.cloud",
+    "origin": "https://waf.jahmed.cloud",
     "allowed": ["block_ip", "unblock_ip", "wg_disconnect", "pause_client", "resume_client", "backup_config"],
     "block_table": "portal_block",
     "pause_table": "portal_paused",

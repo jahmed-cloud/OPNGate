@@ -36,8 +36,8 @@ services:
   portal:
     <<: *portal
     environment:
-      PORTAL_RP_ID: cg.${DOMAIN}
-      PORTAL_ORIGIN: https://cg.${DOMAIN}
+      PORTAL_RP_ID: waf.${DOMAIN}
+      PORTAL_ORIGIN: https://waf.${DOMAIN}
       PORTAL_COOKIE_DOMAIN: ${DOMAIN}
       # Docker's port publishing keeps the real source IP, so this is the Pi 5's address.
       PORTAL_TRUSTED_PROXIES: ${EDGE_HOST_IP:?set EDGE_HOST_IP}/32
@@ -50,8 +50,8 @@ services:
   portal-ingest:
     <<: *portal
     environment:
-      PORTAL_RP_ID: cg.${DOMAIN}
-      PORTAL_ORIGIN: https://cg.${DOMAIN}
+      PORTAL_RP_ID: waf.${DOMAIN}
+      PORTAL_ORIGIN: https://waf.${DOMAIN}
     command: >
       uvicorn app.ingest:ingest_app --host 0.0.0.0 --port 9444
       --ssl-certfile /pki/services.crt --ssl-keyfile /pki/services.key

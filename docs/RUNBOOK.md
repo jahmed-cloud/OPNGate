@@ -15,7 +15,7 @@ OPNsense agent -------- mutual TLS --------> Pi 4 ingest :9444
 Pi 5 / OPNsense CrowdSec clients ----------> Pi 4 LAPI :9080
 ```
 
-The supplied Compose files do not start cloudflared. The portal hostname is `cg.<DOMAIN>`. Caddy only trusts Cloudflare client-IP headers from listed Cloudflare ranges. Maintain those ranges against [Cloudflare's list](https://www.cloudflare.com/ips/). Local private-range peers are also allowed by the supplied edge matcher; restrict that exception if it is unnecessary.
+The supplied Compose files do not start cloudflared. The portal hostname is `waf.<DOMAIN>`. Caddy only trusts Cloudflare client-IP headers from listed Cloudflare ranges. Maintain those ranges against [Cloudflare's list](https://www.cloudflare.com/ips/). Local private-range peers are also allowed by the supplied edge matcher; restrict that exception if it is unnecessary.
 
 ## 1. PKI and service configuration
 
@@ -55,7 +55,7 @@ ssh root@10.10.0.1 'sh /tmp/agent/install.sh'
 scp deploy/pki/out/agent.crt deploy/pki/out/agent.key deploy/pki/out/ingest-ca.pem root@10.10.0.1:/usr/local/etc/fw-agent/
 ```
 
-Edit `/usr/local/etc/fw-agent/agent.json` on the firewall. Set portal_url to `https://10.10.0.22:9444`; set interfaces, gateway name, segment labels and optional telemetry sources to match your OPNsense version. Set action RP ID/origin to `cg.<DOMAIN>` / `https://cg.<DOMAIN>`. Keep `actions.enabled=false`.
+Edit `/usr/local/etc/fw-agent/agent.json` on the firewall. Set portal_url to `https://10.10.0.22:9444`; set interfaces, gateway name, segment labels and optional telemetry sources to match your OPNsense version. Set action RP ID/origin to `waf.<DOMAIN>` / `https://waf.<DOMAIN>`. Keep `actions.enabled=false`.
 
 ```sh
 python3 /usr/local/opnsense/scripts/fw-agent/fw_agent.py -c /usr/local/etc/fw-agent/agent.json --once
