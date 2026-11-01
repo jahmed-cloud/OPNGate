@@ -319,7 +319,15 @@ function chartTip(e) {
   tipEl.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, left - w / 2)) + "px";
   tipEl.style.top = Math.max(8, box.top - tipEl.offsetHeight - 6) + "px";
 }
-document.addEventListener("pointermove", chartTip, { passive: true });
+// Coalesce fast pointer events into one chart/layout update per browser frame.
+let hoverFrame = 0, hoverPointer = null;
+document.addEventListener("pointermove", (event) => {
+  hoverPointer = { target: event.target, clientX: event.clientX };
+  if (!hoverFrame) hoverFrame = requestAnimationFrame(() => {
+    hoverFrame = 0;
+    chartTip(hoverPointer);
+  });
+}, { passive: true });
 document.addEventListener("scroll", () => { if (tipEl) tipEl.hidden = true; }, { passive: true, capture: true });
 
 // Stop the flow animations while the map is scrolled out of view.

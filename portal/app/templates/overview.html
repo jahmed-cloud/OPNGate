@@ -17,14 +17,14 @@
   <div class="tile"><span class="label">Latest latency</span><span class="value">{{ '%.1f' % latest.latency_ms if latest and latest.latency_ms is not none else '—' }} <small>ms</small></span>
     <span class="sub">Packet loss {{ '%.1f' % latest.loss_pct if latest and latest.loss_pct is not none else '—' }}%</span></div>
   <div class="tile"><span class="label">Throughput</span><span class="value compact">↓ {{ latest.rx_bps | bps if latest else '—' }}</span><span class="sub">↑ {{ latest.tx_bps | bps if latest else '—' }}</span></div>
-  <a class="tile tile-link" href="/clients"><span class="label">Clients online</span><span class="value">{{ clients_online }}</span><span class="sub">Explore devices →</span></a>
-  <a class="tile tile-link {{ 'bad' if open_alerts else '' }}" href="/alerts"><span class="label">Open alerts</span><span class="value">{{ open_alerts }}</span><span class="sub">Review events →</span></a>
+  <a class="tile tile-link" href="/clients"><span class="label">Clients online</span><span class="value">{{ "{:,}".format(clients_online) }}</span><span class="sub">Explore devices →</span></a>
+  <a class="tile tile-link {{ 'bad' if open_alerts else '' }}" href="/alerts"><span class="label">Open alerts</span><span class="value">{{ "{:,}".format(open_alerts) }}</span><span class="sub">Review events →</span></a>
   <div class="tile"><span class="label">Firewall uptime</span><span class="value compact">{{ gw.uptime_s | duration if gw.uptime_s else '—' }}</span><span class="sub">Last report {{ last_seen | ago }}</span></div>
 </div>
 <section class="card availability-card">
-  <div class="card-head"><div><h2>Observed availability</h2><p class="muted small">{{ range_key }} window · missing telemetry is shown separately</p></div><div class="availability-number">{{ '%.2f' % availability if availability is not none else '—' }}<small>%</small></div></div>
+  <div class="card-head"><div><h2>Observed availability</h2><p class="muted small">{{ range_key }} window · missing telemetry is shown separately</p></div><div class="availability-number">{{ '%.2f' % availability if availability is not none else '—' }} <small>%</small></div></div>
   {{ uptime_bar(segments, metrics.start, metrics.end) }}
-  <div class="card-head"><div class="legend"><span class="seg-key up"></span>up <span class="seg-key down"></span>outage <span class="seg-key nodata"></span>no WAN observation</div><span class="small muted">{{ '%.1f' % s.coverage_pct }}% bucket coverage · {{ s.sample_count }} samples</span></div>
+  <div class="card-head"><div class="legend"><span class="seg-key up"></span>up <span class="seg-key down"></span>outage <span class="seg-key nodata"></span>no WAN observation</div><span class="small muted">{{ '%.1f' % s.coverage_pct }}% bucket coverage · {{ "{:,}".format(s.sample_count) }} samples</span></div>
   <p class="small muted">Availability is the share of known WAN samples that were up. Coverage is the share of time buckets with telemetry, not measured uptime.</p>
 </section>
 <div class="grid2 chart-grid-layout">
