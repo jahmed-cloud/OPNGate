@@ -25,12 +25,13 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 log = logging.getLogger("fw-agent")
 
 DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
@@ -145,9 +146,9 @@ class Rates:
     def __init__(self):
         self.prev = {}
 
-    def interfaces(self, cfg):
+    def interfaces(self, cfg, timeout=20):
         segments = cfg.get("segments", {})
-        code, stdout, _ = run(["netstat", "-ibn", "--libxo", "json"])
+        code, stdout, _ = run(["netstat", "-ibn", "--libxo", "json"], timeout=timeout)
         if code != 0:
             return []
         try:
@@ -488,11 +489,11 @@ class Portal:
         self.ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         self.ctx.load_cert_chain(cfg["cert_file"], cfg["key_file"])
 
-    def request(self, method, path, body=None):
+    def request(self, method, path, body=None, timeout=20):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.base + path, data=data, method=method,
                                      headers={"Content-Type": "application/json", "User-Agent": f"fw-agent/{VERSION}"})
-        with urllib.request.urlopen(req, timeout=20, context=self.ctx) as resp:
+        with urllib.request.urlopen(req, timeout=timeout, context=self.ctx) as resp:
             return json.loads(resp.read() or b"{}")
 
 
@@ -1076,6 +1077,37 @@ def collect(cfg, rates, client_rates=None, state=None):
     }
 
 
+def collect_live(cfg, rates):
+    """Read interface counters only; skip the initial unmeasured zero baseline."""
+    known = set(rates.prev)
+    interfaces = rates.interfaces(cfg, timeout=2)
+    if not known or not interfaces:
+        return None
+    for interface in interfaces:
+        if interface["name"] not in known:
+            interface["rx_bps"] = interface["tx_bps"] = None
+    return {"interfaces": interfaces}
+
+
+def start_live_worker(cfg, stop):
+    """Independent counters cannot be delayed by DNS, IDS or device collection."""
+    interval = max(2, int(cfg.get("live_interval", 2)))
+    def loop():
+        rates, portal = Rates(), Portal(cfg)
+        while not stop.is_set():
+            started = time.monotonic()
+            try:
+                current = collect_live(cfg, rates)
+                if current:
+                    portal.request("POST", "/v1/live", current, timeout=3)
+            except (urllib.error.URLError, OSError, ValueError, TypeError):
+                log.exception("live counter push failed")
+            stop.wait(max(0.2, interval - (time.monotonic() - started)))
+    worker = threading.Thread(target=loop, daemon=True, name="live-counters")
+    worker.start()
+    return worker
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--config", default=DEFAULT_CONFIG)
@@ -1096,15 +1128,18 @@ def main():
     state = State(cfg.get("state_file", "/var/db/fw-agent/state.json"))
     portal = Portal(cfg)
     interval, poll = int(cfg.get("interval", 30)), int(cfg.get("action_poll", 15))
+    start_live_worker(cfg, threading.Event())
     pending_events = []
     next_push = 0.0
+    next_actions = 0.0
     log.info("fw-agent %s started; pushing to %s", VERSION, cfg["portal_url"])
     while True:
         started = time.monotonic()
-        try:
-            housekeeping(cfg, state)
-        except Exception:
-            log.exception("housekeeping failed")
+        if started >= next_actions:
+            try:
+                housekeeping(cfg, state)
+            except Exception:
+                log.exception("housekeeping failed")
         if started >= next_push:
             next_push = started + interval
             try:
@@ -1115,12 +1150,14 @@ def main():
                     pending_events = []
             except (urllib.error.URLError, OSError, ValueError) as exc:
                 log.warning("push failed: %s", exc)
-        try:
-            process_actions(portal, cfg, state)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            log.warning("action poll failed: %s", exc)
-        state.save()
-        time.sleep(max(1.0, poll - (time.monotonic() - started)))
+        if time.monotonic() >= next_actions:
+            next_actions = time.monotonic() + poll
+            try:
+                process_actions(portal, cfg, state)
+            except (urllib.error.URLError, OSError, ValueError) as exc:
+                log.warning("action poll failed: %s", exc)
+            state.save()
+        time.sleep(max(0.2, min(next_push, next_actions) - time.monotonic()))
 
 
 if __name__ == "__main__":

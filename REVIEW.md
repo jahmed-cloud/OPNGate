@@ -25,3 +25,10 @@ The local automated suite exercises software-authenticator login and signed-acti
 No production gateway configuration is changed by this review. Raspberry Pi ARM builds, real OPNsense command output, physical keys, live CrowdSec parsing, Cloudflare paths and host firewall rules must pass the runbook gates. See [SECURITY.md](docs/SECURITY.md) for remaining action delivery, DHCP/IP reassignment, log rotation and trust-display limitations. A compromised portal cannot forge an operator signature unattended, but could misrepresent the action an operator approves.
 
 Performance changes reduce graph result size and Python memory work. They do not reduce ISP latency, and no target-hardware speedup is claimed without a benchmark.
+
+
+## Live-feed performance follow-up
+
+Current rates now use a dedicated two-second interface-counter worker and mTLS `/v1/live` snapshot ingestion, separate from 30-second historical/device/security telemetry. Authenticated revision-based JSON polling avoids sample aggregation and preserves idle expiry. Overview/Traffic history refreshes every 60 seconds using mounted DOM reconciliation. The Traffic rolling graph uses bounded real browser-session observations, with missing-data gaps. CrowdSec network I/O runs only in its background worker; pages display cached state and freshness.
+
+The regression suite includes live API authorization/revisions/fallback/staleness, history isolation, slow CrowdSec refresh without page blocking, retention of stale bans, counter-baseline behavior, SVG identity and path updates, and live-series gap handling. Deployment verification is recorded in docs/STATUS.md. The live feed is near-real-time; collection plus polling and public-network transit still introduce delay.

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import actions, auth, db, views, waflog
+from . import actions, auth, crowdsec, db, views, waflog
 from .config import settings
 from .security import LoginRequired
 
@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
     db.init()
     stop = threading.Event()
     waflog.start_background(stop)
+    crowdsec.start_background(stop)
     yield
     stop.set()
 

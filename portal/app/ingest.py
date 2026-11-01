@@ -91,6 +91,29 @@ async def telemetry(request: Request):
     return {"ok": True}
 
 
+@ingest_app.post("/v1/live")
+async def live_interfaces(request: Request):
+    """mTLS-only current counters; never add rows to historical samples."""
+    data = await _json(request)
+    interfaces = data.get("interfaces")
+    if not isinstance(interfaces, list) or not 1 <= len(interfaces) <= 64:
+        raise HTTPException(400, "expected 1 to 64 interfaces")
+    clean, names = [], set()
+    for interface in interfaces:
+        if not isinstance(interface, dict):
+            raise HTTPException(400, "invalid interface")
+        name, segment = interface.get("name"), interface.get("segment")
+        if not isinstance(name, str) or not name or len(name) > 100 or name in names:
+            raise HTTPException(400, "invalid or duplicate interface name")
+        if not isinstance(segment, str) or not segment or len(segment) > 100:
+            raise HTTPException(400, "invalid segment")
+        names.add(name)
+        clean.append({"name": name, "segment": segment,
+                      "rx_bps": _num(interface.get("rx_bps")), "tx_bps": _num(interface.get("tx_bps"))})
+    db.put_snapshot("live_interfaces", clean)
+    return {"ok": True}
+
+
 def _track_outage(wan_up: int | None, gw: dict) -> None:
     if wan_up is None:
         return

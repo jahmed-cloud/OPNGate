@@ -163,3 +163,12 @@ Per-device speeds come from the firewall's pf state byte counters on inside inte
 Website blocks use Unbound blocklist policies (Services > Unbound DNS > Blocklist), one per target, described `[portal-<mac>] domains` for a device or `[portal-net-<network>] domains` for a whole network. A device policy covers its current IPs and follows it when they change; a network policy covers the subnets on that network's interface (read with `ifconfig`; WAN is refused because nothing there queries Unbound). Categories are OPNsense's predefined lists plus a fixed set of AdGuard-registry URLs held by the agent; the portal only ever sends list keys. `agent/dnsbl.php list` shows the portal's policies. Applying reloads and re-downloads the lists (about 45-60 s). Enable `block_domains`, `unblock_domains`, `block_network` and `unblock_network` in `actions.allowed` in the firewall's `agent.json` to use them.
 
 See [METRICS.md](METRICS.md) for endpoint and measurement definitions and [REVIEW.md](../REVIEW.md) for verification limits.
+
+
+## Performance feed upgrade (agent 1.4.0)
+
+Deploy the portal and ingest image first, then the matching edge WAF shipper, then replace only the firewall agent script and restart fw_agent. Preserve existing `.env`, PKI, agent.json, state and operator trust files. No firewall rule reload or credential rotation is needed. `live_interval` defaults to 2 seconds when absent, `interval` remains 30 and `action_poll` remains 15. Keep rollback source/image copies before replacement.
+
+Gate: `/v1/live` succeeds on the mTLS ingest listener; `live_interfaces` snapshot timestamps advance approximately every two seconds without increasing the historical samples count at that cadence. Authenticated `/api/live` returns fresh timestamps and revisions, then 204 for the same revision. Traffic's live chart accumulates actual observations; historical chart DOM remains mounted across fragment updates. Pause/hidden-tab behavior and expired-session rejection must work. CrowdSec loading or failure must not delay Threats rendering.
+
+If rolling back the portal/ingest to a version without `/v1/live`, also restore the previous agent script to stop unsupported requests. Do not remove any Docker data volumes or reset the database. Full-report fallback remains available while rolling forward. See PERFORMANCE.md and STATUS.md for verification and remaining work.

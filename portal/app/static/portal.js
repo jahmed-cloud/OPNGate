@@ -93,75 +93,184 @@ function bind(id, handler) {
   });
 }
 
-// Live pages: re-fetch the page and swap <main>, unless the user is in the middle of something on it.
-// The X-Auto-Refresh header keeps these fetches from counting as activity for the idle timeout.
+// Reconcile server fragments in place. Unchanged subtrees retain DOM identity, focus and SVG state.
+function patchNode(current, next) {
+  if (current.nodeType === 1 && next.nodeType === 1 && current.hasAttribute("data-client-owned") && next.hasAttribute("data-client-owned")) return current;
+  if (current.isEqualNode(next)) return current;
+  if (current.nodeType !== next.nodeType || current.nodeName !== next.nodeName) {
+    const replacement = next.cloneNode(true); current.replaceWith(replacement); return replacement;
+  }
+  if (current.nodeType !== 1) { current.nodeValue = next.nodeValue; return current; }
+  for (const attr of [...current.attributes]) if (!next.hasAttribute(attr.name)) current.removeAttribute(attr.name);
+  for (const attr of [...next.attributes]) if (current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
+  patchChildren(current, next);
+  return current;
+}
+function patchChildren(current, next) {
+  const key = (node) => node.nodeType === 1 ? node.getAttribute("data-refresh-section") || node.id : null;
+  const keyed = new Map([...current.childNodes].filter(key).map((node) => [key(node), node]));
+  let cursor = current.firstChild;
+  for (const incoming of [...next.childNodes]) {
+    const id = key(incoming);
+    let match = id ? keyed.get(id) : cursor && !key(cursor) ? cursor : null;
+    if (match) {
+      if (match !== cursor) current.insertBefore(match, cursor);
+      cursor = patchNode(match, incoming).nextSibling;
+    } else {
+      current.insertBefore(incoming.cloneNode(true), cursor);
+    }
+  }
+  while (cursor) { const following = cursor.nextSibling; cursor.remove(); cursor = following; }
+}
+function patchFragment(main, html) {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  patchChildren(main, template.content);
+}
+function liveRate(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  let n = Number(value);
+  for (const unit of ["bit/s", "kbit/s", "Mbit/s", "Gbit/s"]) {
+    if (n < 1000) return `${n.toFixed(unit === "bit/s" ? 0 : 1)} ${unit}`;
+    n /= 1000;
+  }
+  return `${n.toFixed(1)} Tbit/s`;
+}
+// Real observations only: a bounded browser-session window; long gaps break the lines.
+function liveSeries(points, end) {
+  const start = end - 180;
+  const visible = points.filter((p) => p.ts >= start && p.ts <= end);
+  const values = visible.flatMap((p) => [p.rx, p.tx]).filter((v) => Number.isFinite(v) && v >= 0);
+  const high = Math.max(1000, ...values);
+  const step = 10 ** Math.floor(Math.log10(high));
+  const ceiling = Math.ceil(high / step) * step;
+  const path = (field) => {
+    let previous = null, d = "";
+    for (const p of visible) {
+      if (!Number.isFinite(p[field]) || p[field] < 0) { previous = null; continue; }
+      const x = 80 + (p.ts - start) / 180 * 880, y = 146 - p[field] / ceiling * 120;
+      const join = previous !== null && p.ts - previous <= 10;
+      d += `${join ? " L" : " M"}${x.toFixed(1)} ${y.toFixed(1)}`;
+      // Round line caps make an isolated sample visible, without bridging missing reports.
+      if (!join) d += " l0.01 0";
+      previous = p.ts;
+    }
+    return d.trim();
+  };
+  return { rx: path("rx"), tx: path("tx"), ceiling, count: visible.length, start, end };
+}
+function paintLiveGraph(points) {
+  const graph = document.getElementById("live-wan-chart");
+  if (!graph) return;
+  const data = liveSeries(points, Math.floor(Date.now() / 1000));
+  const set = (selector, value, attr) => {
+    const node = graph.querySelector(selector);
+    if (attr) { if (node.getAttribute(attr) !== value) node.setAttribute(attr, value); }
+    else if (node.textContent !== value) node.textContent = value;
+  };
+  set(".traffic-line.down", data.rx, "d"); set(".traffic-line.up", data.tx, "d");
+  set("[data-live-ceiling]", liveRate(data.ceiling)); set("[data-live-half]", liveRate(data.ceiling / 2));
+  const time = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  set("[data-live-start]", time(data.start)); set("[data-live-end]", time(data.end));
+  set("[data-live-empty]", data.count < 2 ? "Collecting live samples…" : "");
+  set("title", `Live WAN rates. ${data.count} observed reports in the last three minutes; scale 0 to ${liveRate(data.ceiling)}.`);
+}
+// Polling never counts as user activity for the idle timeout.
 function startLive() {
   const main = document.getElementById("main");
   const every = parseInt(main?.dataset.refresh || "0", 10);
   if (!main || !every) return;
-  const chip = document.getElementById("live");
-  const text = document.getElementById("live-text");
-  let paused = false, busy = false, last = Date.now(), failed = false, lastHtml = "";
-  try { paused = localStorage.getItem("portal-live-paused") === "1"; } catch (_) { /* storage blocked */ }
-
-  const label = () => {
-    if (!chip) return;
-    chip.classList.toggle("paused", paused);
-    chip.classList.toggle("error", failed && !paused);
-    text.textContent = paused ? "Paused" : failed ? "Offline" : "Live";
-    chip.setAttribute("aria-pressed", String(!paused));
-    const status = document.getElementById("refresh-status");
-    if (status) status.textContent = failed ? "Refresh failed. Displayed figures may be stale; use Refresh to retry."
-      : paused ? "Automatic updates paused. Use Refresh for a manual update."
-      : `Last updated ${new Date(last).toLocaleTimeString()}. Times shown in ${status.dataset.tz || "your time zone"}.`;
-    const age = Math.round((Date.now() - last) / 1000);
-    chip.title = paused ? "Live updates paused. Click to resume."
-      : `Updated ${age < 5 ? "just now" : age + " s ago"}; refreshes every ${every} s. Click to pause.`;
-  };
+  const fast = !!main.querySelector("[data-live-rate]");
+  const chip = document.getElementById("live"), text = document.getElementById("live-text");
+  let paused = false, busy = false, liveBusy = false, last = Date.now(), failed = false, liveFailed = false, snapshot = null;
+  const livePoints = [];
+  try { paused = localStorage.getItem("portal-live-paused") === "1"; } catch (_) {}
   const userBusy = () => {
     const a = document.activeElement;
     return (a && main.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))
       || main.querySelector("details[open]") || String(window.getSelection() || "").length > 0;
   };
-  async function tick(force) {
+  const setText = (el, value) => { if (el.textContent !== value) el.textContent = value; };
+  const paintSnapshot = () => {
+    if (!snapshot) {
+      if (liveFailed) main.querySelectorAll("[data-live-status]").forEach((el) => setText(el, "Rate update failed; showing the page snapshot."));
+      return;
+    }
+    main.querySelectorAll("[data-live-rate]").forEach((el) => {
+      const iface = el.dataset.liveInterface;
+      const data = iface === undefined ? snapshot.wan : snapshot.interfaces?.find((i) => i.name === iface);
+      setText(el, (el.dataset.livePrefix || "") + liveRate(data?.[el.dataset.liveRate]));
+    });
+    const age = snapshot.reported_at ? Math.max(0, Math.floor(Date.now() / 1000 - snapshot.reported_at)) : null;
+    main.querySelectorAll("[data-live-status]").forEach((el) => setText(el,
+      liveFailed ? "Rate update failed; showing last known values."
+      : `Rates reported ${age === null ? "at an unknown time" : age + " s ago"}${snapshot.stale || age > (snapshot.source === "telemetry" ? 120 : 20) ? " · stale" : ""}${snapshot.source === "telemetry" ? " · full-report fallback (30 s)" : ""}.`));
+  };
+  const label = () => {
+    if (chip) {
+      chip.classList.toggle("paused", paused); chip.classList.toggle("error", (failed || liveFailed) && !paused);
+      if (text) text.textContent = paused ? "Paused" : failed || liveFailed ? "Retrying" : "Live";
+      chip.setAttribute("aria-pressed", String(!paused));
+      chip.title = `Click to ${paused ? "resume" : "pause"} updates.`;
+    }
+    const status = document.getElementById("refresh-status");
+    if (status) status.textContent = paused ? "Automatic updates paused. Use Refresh for a manual update."
+      : failed ? "History refresh failed; displayed history may be stale."
+      : `${fast ? "Rate checks every 2 s · " : ""}History refresh every ${every} s · last refreshed ${new Date(last).toLocaleTimeString()}. Times shown in ${status.dataset.tz || "your time zone"}.`;
+    paintSnapshot();
+    if (fast && !paused && !document.hidden && !userBusy()) paintLiveGraph(livePoints);
+  };
+  async function request(url, json) {
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const res = await fetch(url, { signal: controller.signal, credentials: "same-origin", cache: "no-store",
+        headers: { "X-Auto-Refresh": "1", Accept: json ? "application/json" : "text/html", ...(json && snapshot?.revision ? { "X-Live-Revision": snapshot.revision } : {}) } });
+      if (res.status === 401 || (res.redirected && new URL(res.url).pathname === "/login")) { window.location.reload(); return null; }
+      if (res.status === 204) return snapshot;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await (json ? res.json() : res.text());
+    } finally { clearTimeout(timeout); }
+  }
+  async function tick(force = false) {
     if (busy || (!force && paused) || document.hidden || userBusy()) return;
     busy = true;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const expanded = flowOpen();
     try {
-      const res = await fetch(window.location.href, { signal: controller.signal, credentials: "same-origin", headers: { "X-Auto-Refresh": "1" } });
-      if (res.redirected && new URL(res.url).pathname === "/login") { window.location.reload(); return; }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const html = await res.text();
-      if (userBusy()) return;
-      if (html !== lastHtml) {  // nothing new since the last report: leave the DOM alone
-        lastHtml = html;
-        main.innerHTML = html;
-        placeFlowControls();
-        watchFlow();
-      }
-      last = Date.now(); failed = false;
-    } catch (_) {
-      failed = true;
-    } finally {
-      clearTimeout(timeout);
-      busy = false;
-      label();
-    }
+      const html = await request(window.location.href, false);
+      if (html === null || userBusy() || document.hidden || (!force && paused) || expanded !== flowOpen()) return;
+      patchFragment(main, html); placeFlowControls(); watchFlow();
+      last = Date.now(); failed = false; paintSnapshot();
+    } catch (_) { failed = true; }
+    finally { busy = false; label(); }
   }
-
+  async function tickRates(force = false) {
+    if (!fast || liveBusy || (!force && paused) || document.hidden || userBusy()) return;
+    liveBusy = true;
+    try {
+      const data = await request("/api/live", true);
+      if (!data || userBusy() || document.hidden || (!force && paused)) return;
+      snapshot = data; liveFailed = false;
+      const ts = Number(data.reported_at);
+      if (ts > 0 && (!livePoints.length || ts > livePoints[livePoints.length - 1].ts)) {
+        const numeric = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
+        livePoints.push({ ts, rx: numeric(data.wan?.rx_bps), tx: numeric(data.wan?.tx_bps) });
+        while (livePoints.length > 90 || (livePoints.length && livePoints[0].ts < ts - 180)) livePoints.shift();
+      }
+    } catch (_) { liveFailed = true; }
+    finally { liveBusy = false; label(); }
+  }
+  const refresh = () => { tick(true); tickRates(true); };
   chip?.addEventListener("click", () => {
     paused = !paused;
-    try { localStorage.setItem("portal-live-paused", paused ? "1" : "0"); } catch (_) { /* storage blocked */ }
-    label();
-    if (!paused) tick(true);
+    try { localStorage.setItem("portal-live-paused", paused ? "1" : "0"); } catch (_) {}
+    label(); if (!paused) refresh();
   });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(true); });
-  document.getElementById("refresh-now")?.addEventListener("click", () => tick(true));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !paused) refresh(); });
+  document.getElementById("refresh-now")?.addEventListener("click", refresh);
   document.addEventListener("portal:refresh", () => tick(true));
-  setInterval(() => tick(false), every * 1000);
-  setInterval(label, 5000);
-  label();
+  setInterval(() => tick(), every * 1000);
+  if (fast) { setInterval(() => tickRates(), 2000); tickRates(); }
+  setInterval(label, fast ? 2000 : 5000); label();
 }
 
 // Tell the server the browser's time zone (a plain "tz" cookie) so pages show local times.
@@ -298,8 +407,14 @@ function chartTip(e) {
   const svg = e.target.closest && e.target.closest("svg[data-tips]");
   document.querySelectorAll("svg.hovering").forEach((s) => { if (s !== svg) s.classList.remove("hovering"); });
   if (!svg) { if (tipEl) tipEl.hidden = true; return; }
-  let tips = tipCache.get(svg);
-  if (!tips) { try { tips = JSON.parse(svg.dataset.tips || "[]"); } catch (_) { tips = []; } tipCache.set(svg, tips); }
+  const rawTips = svg.dataset.tips || "[]";
+  let cached = tipCache.get(svg);
+  if (!cached || cached.raw !== rawTips) {
+    let tips;
+    try { tips = JSON.parse(rawTips); } catch (_) { tips = []; }
+    cached = { raw: rawTips, tips }; tipCache.set(svg, cached);
+  }
+  const tips = cached.tips;
   if (!tips.length) return;
   const box = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
   const x = (e.clientX - box.left) / box.width * vb.width;

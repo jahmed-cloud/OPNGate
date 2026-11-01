@@ -29,3 +29,8 @@ Coraza audit parts are limited to AHZ to omit full headers and bodies. Rule mess
 Never publish `.env`, `deploy/pki/out/`, private keys, operator recovery codes, databases or network backups. Ignore rules do not remove secrets already committed to history. If a secret is exposed, revoke/rotate it and assess history removal separately.
 
 For a suspected vulnerability, use GitHub private vulnerability reporting if enabled or contact the maintainer through an established private channel. Do not put credentials or exploitable deployment details in a public issue. Stop both stacks and the agent if compromise is suspected; restore from known-good backups and rotate affected keys.
+
+
+## Current-state feed
+
+`/v1/live` is available only on the existing mTLS ingest listener. `/api/live` requires a valid portal session even for unchanged revisions, and only returns display telemetry. Polling does not extend the idle timeout; the live transport has no action or privilege-changing capability. No dashboard/API responses are publicly cacheable. Browser graphs retain at most 90 live observations in memory and expose their freshness. Background CrowdSec cache errors never imply that bans are absent; last-known snapshots are explicitly labeled.

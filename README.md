@@ -39,6 +39,7 @@ up, and refuses to replace a box's certificates with different ones. The [runboo
 - Device search by name, IP, MAC or maker; segment/status filters. Alerts filter by search, source and severity.
 - Threats: recent WAF events with rule, client and path, top rules/clients/paths, per-site totals, Suricata sources and signatures, and active CrowdSec bans. Ordinary HTTP 403 responses are not counted as WAF blocks.
 - Authenticated JSON metrics and CSV downloads, bounded to 240 aggregate points per window.
+- Two-second current WAN/interface rate checks, a mounted three-minute live WAN graph, revision-based JSON polls and independent 60-second history updates. CrowdSec refreshes in the background with visible freshness.
 - Live content updates, pause/resume, manual refresh, timeout/error feedback and a responsive layout with a drawer menu on phones. No CDN dependencies.
 
 ## Security and scope
@@ -115,3 +116,5 @@ node --check portal/app/static/portal.js
 On Linux use `portal/.venv/bin/python` instead. OpenSSL must be available for the real ES256/Ed25519 agent signature tests. Tests use temporary databases and software authenticators, without changing a firewall. See [the review](REVIEW.md) for validation boundaries and remaining work. For contributions, include a clear problem statement and focused tests; never include personal telemetry or credentials.
 
 [Metrics reference](docs/METRICS.md) · [Community post draft](docs/COMMUNITY_POST.md) · [Historical design plan](Firewall%20Gateway%20Portal%20and%20WAF%20%E2%80%93%20Plan.md)
+
+[Performance architecture](docs/PERFORMANCE.md) � [Project status and pending work](docs/STATUS.md)

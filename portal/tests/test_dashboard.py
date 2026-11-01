@@ -327,6 +327,7 @@ def test_crowdsec_bans_listed_without_blocklist_noise(client, monkeypatch):
          "type": "ban", "duration": "3h59m12.5s"},
         *({"origin": "lists", "scenario": "firehol", "value": f"10.0.0.{i}"} for i in range(5)),
     ])
+    crowdsec.refresh_once()
     sign_in(client)
     page = client.get("/threats").text
     assert "192.0.2.50" in page and "crowdsecurity/http-probing" in page and "3h 59m" in page

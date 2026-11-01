@@ -5,6 +5,7 @@
   "key_file": "/usr/local/etc/fw-agent/agent.key",
   "state_file": "/var/db/fw-agent/state.json",
   "interval": 30,
+  "live_interval": 2,
   "action_poll": 15,
 
   "wan_interface": "igc0",

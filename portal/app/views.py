@@ -10,7 +10,7 @@ from urllib.parse import unquote, urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
-from . import actions, crowdsec, db, metrics
+from . import actions, crowdsec, db, live, metrics
 from .config import settings
 from .security import Session, audit, check_csrf, require_user
 from .templating import flow_layout, render
@@ -117,7 +117,7 @@ def overview(request: Request, session: Session = Depends(require_user)):
     return render(
         request, "overview.html", session=session, range_key=key, ranges=list(RANGES), gw=gw, latest=latest,
         metrics=data, flow_gw=flow_gw, flow_wan=flow_wan, flow_segments=flow_segments, flow_height=flow_height,
-        refresh=30, **_device_controls(),
+        refresh=60, **_device_controls(),
         wan_state=wan_state, agent_online=agent_online, last_seen=last_seen, segments=segments,
         availability=data["summary"]["availability_pct"], outages=outages,
         latency=[p["latency_ms"] for p in data["points"]], loss=[p["loss_pct"] for p in data["points"]],
@@ -130,6 +130,14 @@ def overview(request: Request, session: Session = Depends(require_user)):
 @router.get("/api/metrics")
 def metrics_api(request: Request, session: Session = Depends(require_user)):
     return metrics.window(_window(request)[0])
+
+
+@router.get("/api/live")
+def live_api(request: Request, session: Session = Depends(require_user)):
+    data = live.snapshot()
+    if request.headers.get("x-live-revision") == data["revision"]:
+        return Response(status_code=204)
+    return data
 
 
 @router.get("/exports/metrics.csv")
@@ -183,6 +191,10 @@ def traffic(request: Request, session: Session = Depends(require_user)):
              "updated": latest["ts"] if latest else None,
              "stale": latest is None or now - latest["ts"] >= 120,
              "rx_avg": sum(rx) / len(rx) if rx else None, "tx_avg": sum(tx) / len(tx) if tx else None}
+    current = live.snapshot()
+    if current["reported_at"] is not None:
+        stats.update(rx_now=current["wan"]["rx_bps"], tx_now=current["wan"]["tx_bps"],
+                     updated=current["reported_at"], stale=current["stale"])
     # From the devices' side: on the WAN, in is download; on an inside interface, out is the devices' download.
     ifaces = []
     for i in interfaces:
@@ -198,7 +210,7 @@ def traffic(request: Request, session: Session = Depends(require_user)):
     net_blocks = {key[1]: aid for aid, key in actions.active_effects().items() if key[0] == "network"}
     return render(
         request, "traffic.html", session=session, range_key=key, ranges=list(RANGES), interfaces=ifaces,
-        peak_iface=peak_iface, updated=ts, metrics=data, stats=stats, refresh=30,
+        peak_iface=peak_iface, updated=ts, metrics=data, stats=stats, refresh=60,
         net_pending=net_pending, net_blocks=net_blocks,
     )
 
