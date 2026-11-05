@@ -23,6 +23,7 @@ from fastapi import HTTPException, Request
 
 from . import db, notify
 from .config import settings
+from . import identity
 
 log = logging.getLogger("portal")
 ph = PasswordHasher()  # argon2id, library defaults (RFC 9106 low-memory profile)
@@ -369,8 +370,8 @@ def same_origin(request: Request) -> bool:
     if origin is None:
         # Browsers always send Origin on POST from a page; allow only if Referer matches.
         referer = request.headers.get("referer", "")
-        return referer.startswith(settings.origin + "/")
-    return origin == settings.origin
+        return referer.startswith(identity.current().origin + "/")
+    return origin == identity.current().origin
 
 
 async def check_csrf(request: Request, session: Session) -> None:

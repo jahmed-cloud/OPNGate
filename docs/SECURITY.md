@@ -1,4 +1,4 @@
-# Security model and limitations
+# OPNGate security model and limitations
 
 ## Trust boundaries
 
@@ -7,6 +7,10 @@ The browser-facing portal requires passkey/FIDO2 user verification or password p
 A signature prevents unattended forgery by a portal without a trusted private key. It does not provide a trusted display of transaction details: a compromised portal could misrepresent the action an operator is asked to approve. Keep management access separate, protect admin workstations and inspect action parameters.
 
 Agent ingest is a separate TLS listener requiring a certificate from the private CA. Its application routes rely on that TLS listener and network isolation; do not expose the ingest ASGI app through an ordinary public reverse proxy. The WAF shipper uses a shared token and a trusted source address; `/internal/*` is refused at the public edge.
+
+## Hostname identity
+
+Passkeys are scoped to their registered RP ID. OPNGate records that ID per credential and supports only a configured primary origin plus an optional explicit legacy origin during migration. CSRF checks use the selected identity; arbitrary request hosts cannot add trusted origins. Signed-action payloads and the firewall verifier bind the browser origin and RP hash to the same configured pair. Public-key exports include the primary identity only. See [HOSTNAME_MIGRATION.md](HOSTNAME_MIGRATION.md).
 
 ## WAF configuration
 
@@ -33,4 +37,4 @@ For a suspected vulnerability, use GitHub private vulnerability reporting if ena
 
 ## Current-state feed
 
-`/v1/live` is available only on the existing mTLS ingest listener. `/api/live` requires a valid portal session even for unchanged revisions, and only returns display telemetry. Polling does not extend the idle timeout; the live transport has no action or privilege-changing capability. No dashboard/API responses are publicly cacheable. Browser graphs retain at most 90 live observations in memory and expose their freshness. Background CrowdSec cache errors never imply that bans are absent; last-known snapshots are explicitly labeled.
+`/v1/live` is available only on the existing mTLS ingest listener. `/api/live` requires a valid portal session even for unchanged revisions, and only returns display telemetry. Polling does not extend the idle timeout; the live transport has no action or privilege-changing capability. No dashboard/API responses are publicly cacheable. Browser graphs retain at most 180 live observations in memory and expose their freshness. Background CrowdSec cache errors never imply that bans are absent; last-known snapshots are explicitly labeled.

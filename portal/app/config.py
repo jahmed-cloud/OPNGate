@@ -23,8 +23,9 @@ def _live_directory() -> Path:
 @dataclass(frozen=True)
 class Settings:
     rp_id: str = field(default_factory=lambda: _env("PORTAL_RP_ID", "localhost"))
-    rp_name: str = field(default_factory=lambda: _env("PORTAL_RP_NAME", "WAF-OPNsense"))
+    rp_name: str = field(default_factory=lambda: _env("PORTAL_RP_NAME", "OPNGate"))
     origin: str = field(default_factory=lambda: _env("PORTAL_ORIGIN", "http://localhost:8000"))
+    legacy_origin: str = field(default_factory=lambda: _env("PORTAL_LEGACY_ORIGIN"))
     data_dir: Path = field(default_factory=lambda: Path(_env("PORTAL_DATA_DIR", "./data")))
     live_dir: Path = field(default_factory=_live_directory)
     # Fernet key used to encrypt TOTP secrets at rest. Generate with `python -m app.cli gen-key`.

@@ -126,7 +126,7 @@ def export_keys(args) -> None:
 def trusted_keys_doc() -> dict:
     rows = db.q(
         "SELECT c.*, u.username FROM credentials c JOIN users u ON u.id=c.user_id "
-        "WHERE u.role='operator' AND u.disabled=0 ORDER BY u.username, c.created_at"
+        "WHERE u.role='operator' AND u.disabled=0 AND c.rp_id=? ORDER BY u.username, c.created_at", settings.rp_id
     )
     return {
         "rp_id": settings.rp_id,

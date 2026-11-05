@@ -14,6 +14,7 @@
 #   hostfw    host firewall on both Pis (only from ADMIN_IP, so you cannot lock yourself out)
 #   user      create the first portal user (you type the password)
 #   keys      copy registered passkeys to the firewall so it accepts signed actions
+#   update    existing stack: portal, ingest and shipper only; preserves agent/routes/PKI
 #   status    quick health check of all three boxes
 #   all       check pki secrets services edge firewall [hostfw] user status
 set -eu
@@ -25,9 +26,18 @@ CONF=${DEPLOY_CONF:-$ROOT/deploy/deploy.conf}
 . "$CONF"
 : "${DOMAIN:?}" "${FIREWALL:?}" "${EDGE:?}" "${EDGE_IP:?}" "${SERVICES:?}" "${SERVICES_IP:?}" "${ADMIN_IP:?}"
 REMOTE_DIR=${REMOTE_DIR:-/opt/gateway}
-PORTAL_HOST=waf.$DOMAIN
-SSH_KEY=$(eval echo "${SSH_KEY:-~/.ssh/id_ed25519}")
-SSH="ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=10"
+PORTAL_SUBDOMAIN=${PORTAL_SUBDOMAIN:-waf}
+PORTAL_HOST=$PORTAL_SUBDOMAIN.$DOMAIN
+SSH_KEY=${SSH_KEY:-$HOME/.ssh/id_ed25519}
+case "$SSH_KEY" in '~/'*) SSH_KEY=$HOME/${SSH_KEY#\~/} ;; esac
+ssh_cmd() { command ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$@"; }
+case "$REMOTE_DIR" in /*) ;; *) echo 'REMOTE_DIR must be an absolute POSIX path'; exit 1 ;; esac
+case "$REMOTE_DIR" in *[!a-zA-Z0-9_./-]*|*..*) echo 'Unsafe REMOTE_DIR'; exit 1 ;; esac
+for target in "$FIREWALL" "$EDGE" "$SERVICES"; do
+  case "$target" in root@*[!a-zA-Z0-9@.:-]*|*[!a-zA-Z0-9@.:-]*|-*|'') echo 'Invalid SSH target'; exit 1 ;; esac
+  case "$target" in root@*) ;; *) echo 'SSH targets must use root@host'; exit 1 ;; esac
+done
+case "$PORTAL_SUBDOMAIN" in ''|*[!a-zA-Z0-9-]*) echo 'Invalid PORTAL_SUBDOMAIN'; exit 1 ;; esac
 PKI=$ROOT/deploy/pki/out
 
 say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -50,49 +60,63 @@ getenv() { sed -n "s/^$2=//p" "$1" | head -1; }
 # Copy paths (relative to the repo) to a host's REMOTE_DIR, leaving local junk behind.
 push() { # host path...
   host=$1; shift
-  tar -C "$ROOT" -cf - --exclude=.venv --exclude=data --exclude=__pycache__ --exclude=.pytest_cache --exclude=tests "$@" \
-    | $SSH "$host" "mkdir -p $REMOTE_DIR && tar -xf - -C $REMOTE_DIR"
+  archive=$(mktemp)
+  if ! tar -C "$ROOT" -cf "$archive" --exclude=.venv --exclude=data --exclude=__pycache__ --exclude=.pytest_cache --exclude=tests "$@"; then
+    rm -f "$archive"; die "could not create the upload archive; nothing sent"
+  fi
+  if ! ssh_cmd "$host" "mkdir -p $REMOTE_DIR && tar -xf - -C $REMOTE_DIR" < "$archive"; then
+    rm -f "$archive"; die "upload to $host failed"
+  fi
+  rm -f "$archive"
 }
 
 # Refuse to replace a box's certificate with a different one: a fresh local PKI would cut the firewall
 # and Pi 5 off from the portal. FORCE_PKI=yes when you really are rotating the CA.
 same_cert() { # host remote-file local-file
   [ "${FORCE_PKI:-no}" = yes ] && return 0
-  remote=$($SSH "$1" "cat $2 2>/dev/null" || true)
+  remote=$(ssh_cmd "$1" "cat $2 2>/dev/null" || true)
   [ -z "$remote" ] && return 0
   [ "$remote" = "$(cat "$3")" ] || die "$1:$2 differs from $3. Copy the live certificates into deploy/pki/out, or run with FORCE_PKI=yes to replace them everywhere."
 }
 
 compose() { # host dir args...
   host=$1; dir=$2; shift 2
-  $SSH "$host" "cd $REMOTE_DIR/deploy/$dir && docker compose $*"
+  ssh_cmd "$host" "cd $REMOTE_DIR/deploy/$dir && docker compose $*"
 }
 
 step_check() {
   say "Checking tools and SSH"
-  for t in ssh tar openssl awk; do command -v $t >/dev/null || die "missing local tool: $t"; done
+  for t in ssh tar openssl awk sed grep curl mktemp; do command -v "$t" >/dev/null || die "missing local tool: $t"; done
   ok "local tools"
   [ -f "$SSH_KEY" ] || die "SSH key not found: $SSH_KEY"
   for h in "$SERVICES" "$EDGE"; do
-    $SSH "$h" true 2>/dev/null || die "cannot SSH to $h (key login as root needed)"
-    if ! $SSH "$h" "docker compose version" >/dev/null 2>&1; then
+    ssh_cmd "$h" true 2>/dev/null || die "cannot SSH to $h (key login as root needed)"
+    if ! ssh_cmd "$h" "docker compose version" >/dev/null 2>&1; then
       if [ "${INSTALL_DOCKER:-no}" = yes ]; then
         echo "   installing Docker on $h"
-        $SSH "$h" "curl -fsSL https://get.docker.com | sh"
+        ssh_cmd "$h" "curl -fsSL https://get.docker.com | sh"
       else
         die "Docker with compose missing on $h (install it, or set INSTALL_DOCKER=yes)"
       fi
     fi
     ok "$h (SSH, Docker)"
   done
-  $SSH "$FIREWALL" "/bin/sh -c 'test -x /usr/local/sbin/configctl'" 2>/dev/null || die "cannot reach OPNsense at $FIREWALL"
+  ssh_cmd "$FIREWALL" "/bin/sh -c 'test -x /usr/local/sbin/configctl'" 2>/dev/null || die "cannot reach OPNsense at $FIREWALL"
   ok "$FIREWALL (OPNsense)"
 }
 
 step_pki() {
   say "Certificates"
-  if [ -f "$PKI/services.crt" ] && [ -f "$PKI/agent.crt" ]; then
-    ok "already in deploy/pki/out (delete it to start over)"
+  complete=yes; found=no
+  for file in services.crt services.key agent.crt agent.key ingest-ca.pem; do
+    [ -f "$PKI/$file" ] || complete=no
+    [ ! -e "$PKI/$file" ] || found=yes
+  done
+  [ ! -e "$PKI/ingest-ca.key" ] || found=yes
+  if [ "$complete" = yes ]; then
+    ok "existing certificate set retained"
+  elif [ "$found" = yes ]; then
+    die "incomplete PKI set; restore the matching files from backup before deploying"
   else
     sh "$ROOT/deploy/pki/make-pki.sh" "$SERVICES_IP"
     ok "created; move deploy/pki/out/ingest-ca.key somewhere offline when you are done"
@@ -107,7 +131,7 @@ step_secrets() {
            "$EDGE edge/crowdsec/parsers/home-whitelist.yaml"; do
     set -- $f
     [ -f "$ROOT/deploy/$2" ] && continue
-    if $SSH "$1" "cat $REMOTE_DIR/deploy/$2" > "$ROOT/deploy/$2.tmp" 2>/dev/null && [ -s "$ROOT/deploy/$2.tmp" ]; then
+    if ssh_cmd "$1" "cat $REMOTE_DIR/deploy/$2" > "$ROOT/deploy/$2.tmp" 2>/dev/null && [ -s "$ROOT/deploy/$2.tmp" ]; then
       mv "$ROOT/deploy/$2.tmp" "$ROOT/deploy/$2"; ok "kept existing deploy/$2 from $1"
     else
       rm -f "$ROOT/deploy/$2.tmp"
@@ -116,10 +140,10 @@ step_secrets() {
   [ -f "$s" ] || cp "$ROOT/deploy/services/.env.example" "$s"
   [ -f "$e" ] || cp "$ROOT/deploy/edge/.env.example" "$e"
   setenv "$s" DOMAIN "$DOMAIN"; setenv "$s" SERVICES_HOST_IP "$SERVICES_IP"; setenv "$s" EDGE_HOST_IP "$EDGE_IP"
-  setenv "$s" PORTAL_RP_NAME "${PORTAL_TITLE:-WAF-OPNsense}"; setenv "$s" PORTAL_TZ "${TZ:-UTC}"
+  setenv "$s" PORTAL_SUBDOMAIN "$PORTAL_SUBDOMAIN"; setenv "$s" PORTAL_LEGACY_ORIGIN "${LEGACY_PORTAL_ORIGIN:-}"; setenv "$s" PORTAL_RP_NAME "${PORTAL_TITLE:-OPNGate}"; setenv "$s" PORTAL_TZ "${TZ:-UTC}"
   for k in CROWDSEC_CADDY_KEY CROWDSEC_OPNSENSE_KEY PORTAL_WAF_SHIP_TOKEN; do setenv "$s" $k "$(rand 32)" keep; done
   setenv "$s" CROWDSEC_PORTAL_KEY "$(rand 24)" keep
-  setenv "$e" DOMAIN "$DOMAIN"; setenv "$e" SERVICES_HOST_IP "$SERVICES_IP"; setenv "$e" WAF_MODE "${WAF_MODE:-DetectionOnly}"
+  setenv "$e" DOMAIN "$DOMAIN"; setenv "$e" PORTAL_HOSTS "${PORTAL_HOSTS:-$PORTAL_HOST}"; setenv "$e" SERVICES_HOST_IP "$SERVICES_IP"; setenv "$e" WAF_MODE "${WAF_MODE:-DetectionOnly}"
   # Shared between the boxes: always copied from the services file.
   setenv "$e" CROWDSEC_CADDY_KEY "$(getenv "$s" CROWDSEC_CADDY_KEY)"
   setenv "$e" PORTAL_WAF_SHIP_TOKEN "$(getenv "$s" PORTAL_WAF_SHIP_TOKEN)"
@@ -145,8 +169,8 @@ step_services() {
   same_cert "$SERVICES" "$REMOTE_DIR/deploy/pki/out/ingest-ca.pem" "$PKI/ingest-ca.pem"
   push "$SERVICES" portal deploy/services deploy/pki/out/ingest-ca.pem deploy/pki/out/services.crt deploy/pki/out/services.key
   ok "code and certificates copied"
-  compose "$SERVICES" services build -q portal
-  $SSH "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose run --rm -T portal sh -c 'test -f \"\$PORTAL_SECRET_KEY_FILE\" || python -m app.cli gen-key'"
+  compose "$SERVICES" services build -q portal portal-ingest
+  ssh_cmd "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose run --rm -T portal sh -c 'test -f \"\$PORTAL_SECRET_KEY_FILE\" || python -m app.cli gen-key'"
   compose "$SERVICES" services up -d --remove-orphans
   ok "containers up"
   # The edge CrowdSec agent logs in to this API with its own password.
@@ -172,8 +196,8 @@ step_firewall() {
   same_cert "$FIREWALL" /usr/local/etc/fw-agent/agent.crt "$PKI/agent.crt"
   same_cert "$FIREWALL" /usr/local/etc/fw-agent/ingest-ca.pem "$PKI/ingest-ca.pem"
   tar -C "$ROOT" -cf - --exclude=__pycache__ agent deploy/pki/out/agent.crt deploy/pki/out/agent.key deploy/pki/out/ingest-ca.pem \
-    | $SSH "$FIREWALL" "/bin/sh -c 'rm -rf /tmp/fw-deploy && mkdir -p /tmp/fw-deploy && tar -xf - -C /tmp/fw-deploy'"
-  $SSH "$FIREWALL" /bin/sh -s -- "$SERVICES_IP" "$PORTAL_HOST" "${PAUSE_INTERFACES:-lan}" "${WAN_INTERFACE:-wan}" <<'EOF'
+    | ssh_cmd "$FIREWALL" "/bin/sh -c 'rm -rf /tmp/fw-deploy && mkdir -p /tmp/fw-deploy && tar -xf - -C /tmp/fw-deploy'"
+  ssh_cmd "$FIREWALL" /bin/sh -s -- "$SERVICES_IP" "$PORTAL_HOST" "${PAUSE_INTERFACES:-lan}" "${WAN_INTERFACE:-wan}" <<'EOF'
 set -eu
 SERVICES_IP=$1; PORTAL_HOST=$2; INSIDE=$3; WAN=$4
 ETC=/usr/local/etc/fw-agent
@@ -205,10 +229,10 @@ step_hostfw() {
   say "Host firewall on the Pis"
   for pair in "$EDGE edge" "$SERVICES services"; do
     set -- $pair; host=$1; role=$2
-    from=$($SSH "$host" 'echo ${SSH_CLIENT%% *}')
+    from=$(ssh_cmd "$host" 'echo ${SSH_CLIENT%% *}')
     [ "$from" = "$ADMIN_IP" ] || die "$host sees you as $from, not ADMIN_IP=$ADMIN_IP; fix deploy.conf first or you would lose SSH"
     push "$host" deploy/hostfw
-    $SSH "$host" /bin/sh -s <<EOF
+    ssh_cmd "$host" /bin/sh -s <<EOF
 set -eu
 cat > /etc/gw-hostfw.env <<'ENV'
 LAN_IF=${LAN_IF:-eth0}
@@ -225,47 +249,79 @@ systemctl daemon-reload
 systemctl enable gw-hostfw@$role >/dev/null 2>&1
 systemctl restart gw-hostfw@$role
 EOF
-    $SSH "$host" true || die "lost SSH to $host after the host firewall: run 'systemctl stop gw-hostfw@$role' on its console"
+    ssh_cmd "$host" true || die "lost SSH to $host after the host firewall: run 'systemctl stop gw-hostfw@$role' on its console"
     ok "$host ($role)"
   done
 }
 
 step_user() {
   say "Portal user"
-  n=$($SSH "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose exec -T portal python -m app.cli list-users" 2>/dev/null | grep -c . || true)
-  if [ "${n:-0}" -gt 1 ]; then
+  n=$(ssh_cmd "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose exec -T portal python -m app.cli list-users" 2>/dev/null | grep -c . || true)
+  if [ "${n:-0}" -gt 0 ]; then
     ok "users already exist (add more with: deploy.sh user NAME)"
     [ -z "${1:-}" ] && return 0
   fi
   name=${1:-${ADMIN_USER:-admin}}
   echo "   creating '$name' (operator). Type the password when asked; then sign in at https://$PORTAL_HOST"
-  ssh -t -i "$SSH_KEY" "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose exec portal python -m app.cli create-user $name --role operator"
+  ssh -t -i "$SSH_KEY" -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose exec portal python -m app.cli create-user $name --role operator"
 }
 
 step_keys() {
   say "Passkeys to the firewall"
-  $SSH "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose exec -T portal python -m app.cli export-keys" > "$ROOT/.tmp-operator_keys.json"
+  ssh_cmd "$SERVICES" "cd $REMOTE_DIR/deploy/services && docker compose exec -T portal python -m app.cli export-keys" > "$ROOT/.tmp-operator_keys.json"
   grep -q '"' "$ROOT/.tmp-operator_keys.json" || { rm -f "$ROOT/.tmp-operator_keys.json"; die "no passkeys yet: register one under Account security first"; }
-  $SSH "$FIREWALL" "/bin/sh -c 'umask 077; cat > /usr/local/etc/fw-agent/operator_keys.json && service fw_agent restart >/dev/null'" < "$ROOT/.tmp-operator_keys.json"
+  ssh_cmd "$FIREWALL" "/bin/sh -c 'umask 077; cat > /usr/local/etc/fw-agent/operator_keys.json && service fw_agent restart >/dev/null'" < "$ROOT/.tmp-operator_keys.json"
   rm -f "$ROOT/.tmp-operator_keys.json"
   ok "operator_keys.json updated; set actions.enabled=true in agent.json once to allow signed actions"
 }
 
+# Existing-install application update. Keep live Compose files, routes, PKI,
+# agent code/configuration, trust and host-firewall rules intact.
+step_update() {
+  step_check
+  say "Updating OPNGate application on the existing stack"
+  for pair in "$SERVICES services" "$EDGE edge"; do
+    set -- $pair; host=$1; role=$2
+    ssh_cmd "$host" "test -f $REMOTE_DIR/deploy/$role/.env && test -f $REMOTE_DIR/deploy/$role/docker-compose.yml" \
+      || die "$host has no existing stack; use Install for a new deployment"
+  done
+  # Do not install the firewall agent here: local telemetry/control extensions
+  # are operator-owned and need a separately reviewed firewall upgrade.
+  for host in "$SERVICES" "$EDGE"; do
+    ssh_cmd "$host" "mkdir -p $REMOTE_DIR/releases; tar -czf $REMOTE_DIR/releases/opngate-app-\$(date +%Y%m%d%H%M%S).tgz -C $REMOTE_DIR portal"
+    push "$host" portal
+  done
+  compose "$SERVICES" services build portal portal-ingest
+  compose "$SERVICES" services up -d --no-deps portal-ingest
+  compose "$SERVICES" services up -d --no-deps portal
+  compose "$EDGE" edge build waf-shipper
+  compose "$EDGE" edge up -d --no-deps waf-shipper
+  step_status
+}
+
 step_status() {
   say "Status"
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$PORTAL_HOST/login" || echo 000)
-  [ "$code" = 200 ] && ok "https://$PORTAL_HOST/login answers 200" || echo "   !!  https://$PORTAL_HOST/login answered $code (DNS, Cloudflare or Caddy)"
+  issues=0
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "https://$PORTAL_HOST/login") || code=000
+  if [ "$code" = 200 ]; then ok "https://$PORTAL_HOST/login answers 200";
+  else echo "   !!  https://$PORTAL_HOST/login answered $code (check DNS, TLS and Caddy)"; issues=1; fi
   for pair in "$SERVICES services" "$EDGE edge"; do
     set -- $pair
-    $SSH "$1" "cd $REMOTE_DIR/deploy/$2 && docker compose ps -a --format '{{.Service}}: {{.Status}}'" 2>/dev/null \
-      | sed "s/^/   $2  /" || echo "   !!  $1 unreachable"
+    if output=$(ssh_cmd "$1" "cd $REMOTE_DIR/deploy/$2 && docker compose ps -a --format '{{.Service}}: {{.Status}}'" 2>/dev/null); then
+      printf '%s\n' "$output" | sed "s/^/   $2  /"
+      running=$(ssh_cmd "$1" "cd $REMOTE_DIR/deploy/$2 && docker compose ps --status running -q | wc -l") || running=0
+      if [ "$running" -lt 3 ]; then echo "   !!  $2 has fewer than three running core services"; issues=1; fi
+    else echo "   !!  $1 unreachable"; issues=1; fi
   done
-  $SSH "$FIREWALL" "/bin/sh -c 'service fw_agent status'" 2>/dev/null | sed 's/^/   firewall  /' || echo "   !!  agent not running"
+  if output=$(ssh_cmd "$FIREWALL" "/bin/sh -c 'service fw_agent status'" 2>/dev/null); then
+    printf '%s\n' "$output" | sed 's/^/   firewall  /'
+  else echo "   !!  agent not running"; issues=1; fi
+  [ "$issues" -eq 0 ]
 }
 
 cmd=${1:-help}; [ $# -gt 0 ] && shift
 case $cmd in
-  check|pki|secrets|services|edge|firewall|hostfw|keys|status) step_$cmd ;;
+  check|pki|secrets|services|edge|firewall|hostfw|keys|status|update) step_$cmd ;;
   user) step_user "${1:-}" ;;
   all) step_check; step_pki; step_secrets; step_services; step_edge; step_firewall; step_hostfw; step_user; step_status
        say "Done. Next: sign in at https://$PORTAL_HOST, add a passkey under Account security, then run: sh deploy/deploy.sh keys" ;;

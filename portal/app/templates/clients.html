@@ -3,7 +3,7 @@
 {% block title %}Clients · {{ rp_name }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><p class="eyebrow">Devices</p><h1>Clients <span class="muted">{{ rows | length }}</span></h1>
+  <div><p class="eyebrow">Devices</p><h1>Devices <span class="muted">{{ rows | length }}</span></h1>
     <p class="page-description">Live speed per device. Pausing, limiting or blocking sites for a device is signed with your security key and checked by the firewall.</p></div>
   <form class="filters" method="get">
     <input name="q" value="{{ q }}" placeholder="Name, IP, MAC or maker" aria-label="Search clients" maxlength="200">
@@ -14,6 +14,7 @@
     <button>Filter</button>
   </form>
 </div>
+<p class="small muted">To block a device: <strong>Manage → Pause internet → choose duration → Approve with security key</strong>. <a href="/help#device">Blocking guide</a></p>
 {% if limited %}<p class="banner warn">Showing the first 500 matching devices. Narrow your search or segment.</p>{% endif %}
 <section class="card scroll">
 <table class="clients">

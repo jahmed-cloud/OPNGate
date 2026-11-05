@@ -27,6 +27,7 @@ from webauthn.helpers.structs import (
 
 from . import db
 from .config import settings
+from . import identity
 
 # Only algorithms the firewall agent can verify with the stock `openssl` binary.
 ALGS = [
@@ -41,9 +42,9 @@ class WebAuthnError(Exception):
 
 
 def registration_options(user_row) -> tuple:
-    existing = db.q("SELECT id FROM credentials WHERE user_id=?", user_row["id"])
+    existing = db.q("SELECT id FROM credentials WHERE user_id=? AND rp_id=?", user_row["id"], identity.current().rp_id)
     options = generate_registration_options(
-        rp_id=settings.rp_id,
+        rp_id=identity.current().rp_id,
         rp_name=settings.rp_name,
         user_id=user_row["webauthn_user_id"],
         user_name=user_row["username"],
@@ -63,8 +64,8 @@ def finish_registration(user_row, credential: dict, challenge: bytes, name: str)
         verified = verify_registration_response(
             credential=credential,
             expected_challenge=challenge,
-            expected_rp_id=settings.rp_id,
-            expected_origin=settings.origin,
+            expected_rp_id=identity.current().rp_id,
+            expected_origin=identity.current().origin,
             require_user_verification=True,
             supported_pub_key_algs=ALGS,
         )
@@ -73,9 +74,9 @@ def finish_registration(user_row, credential: dict, challenge: bytes, name: str)
     cred_id = bytes_to_base64url(verified.credential_id)
     alg = int(decode_credential_public_key(verified.credential_public_key).alg)
     db.run(
-        "INSERT INTO credentials(id, user_id, public_key, alg, sign_count, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO credentials(id, user_id, public_key, alg, sign_count, name, created_at, rp_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         cred_id, user_row["id"], verified.credential_public_key, alg, verified.sign_count,
-        (name or "Security key")[:60], db.now(),
+        (name or "Security key")[:60], db.now(), identity.current().rp_id,
     )
     return cred_id
 
@@ -84,9 +85,9 @@ def authentication_options(user_id: Optional[int] = None, challenge: Optional[by
     allow = None
     if user_id is not None:
         allow = [PublicKeyCredentialDescriptor(id=base64url_to_bytes(r["id"]))
-                 for r in db.q("SELECT id FROM credentials WHERE user_id=?", user_id)]
+                 for r in db.q("SELECT id FROM credentials WHERE user_id=? AND rp_id=?", user_id, identity.current().rp_id)]
     options = generate_authentication_options(
-        rp_id=settings.rp_id,
+        rp_id=identity.current().rp_id,
         challenge=challenge,
         allow_credentials=allow,
         user_verification=UserVerificationRequirement.REQUIRED,
@@ -102,7 +103,7 @@ def finish_authentication(credential: dict, challenge: bytes, user_id: Optional[
         raise WebAuthnError("malformed credential") from exc
     cred_id = bytes_to_base64url(parsed.raw_id)
     cred = db.one("SELECT * FROM credentials WHERE id=?", cred_id)
-    if not cred or (user_id is not None and cred["user_id"] != user_id):
+    if not cred or (cred["rp_id"] and cred["rp_id"] != identity.current().rp_id) or (user_id is not None and cred["user_id"] != user_id):
         raise WebAuthnError("unknown credential")
     user = db.one("SELECT * FROM users WHERE id=? AND disabled=0", cred["user_id"])
     if not user:
@@ -113,8 +114,8 @@ def finish_authentication(credential: dict, challenge: bytes, user_id: Optional[
         verified = verify_authentication_response(
             credential=parsed,
             expected_challenge=challenge,
-            expected_rp_id=settings.rp_id,
-            expected_origin=settings.origin,
+            expected_rp_id=identity.current().rp_id,
+            expected_origin=identity.current().origin,
             credential_public_key=cred["public_key"],
             credential_current_sign_count=cred["sign_count"],
             require_user_verification=True,

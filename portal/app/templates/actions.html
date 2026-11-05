@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>Actions</h1></div>
+<p class="small muted">Prepare a request below, review it, then approve it with your security key. <a href="/help#ip">Block IP guide</a> · <a href="/help#approval">Understand action status</a></p>
 {% if error %}<p class="banner bad">{{ error }}</p>{% endif %}
 {% if not has_key %}<p class="banner warn">Actions must be signed with a security key. Add one under <a href="/security">Security</a>, then export keys to the firewall.</p>{% endif %}
 

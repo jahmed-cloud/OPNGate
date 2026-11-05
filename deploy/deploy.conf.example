@@ -1,8 +1,10 @@
 # Settings for deploy/deploy.sh. Copy to deploy/deploy.conf (git-ignored) and edit.
 # Everything runs from your admin PC over SSH; the boxes need SSH key login for root.
 
-DOMAIN=example.com              # portal at https://waf.example.com (Cloudflare DNS record, proxied)
-PORTAL_TITLE="WAF-OPNsense"     # name shown in the portal and on passkey prompts
+DOMAIN=example.com              # parent DNS domain
+PORTAL_SUBDOMAIN=opngate        # console at https://opngate.example.com
+LEGACY_PORTAL_ORIGIN=           # existing installs only, e.g. https://waf.example.com
+PORTAL_TITLE="OPNGate"     # name shown in the portal and on passkey prompts
 TZ=UTC                          # fallback time zone for pages (browsers send their own), e.g. Asia/Kolkata
 
 SSH_KEY=~/.ssh/id_ed25519
@@ -29,7 +31,7 @@ UPSTREAMS="10.10.0.21:8384 10.10.0.21:8090 10.10.0.21:8900"   # apps Caddy may r
 PAUSE_INTERFACES="lan,opt2"
 WAN_INTERFACE=wan
 
-WAF_MODE=DetectionOnly          # switch to On after a week of clean detections
+WAF_MODE=DetectionOnly          # enable On after tuning legitimate traffic and testing each application
 HOME_IP=                        # your static public IP: never banned by CrowdSec (optional)
 ADMIN_USER=admin                # first portal user, created on the first run (you type the password)
 INSTALL_DOCKER=no               # yes = install Docker on the Pis with get.docker.com if missing

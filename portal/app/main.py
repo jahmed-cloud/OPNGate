@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import actions, auth, crowdsec, db, live, views, waflog
+from . import actions, auth, crowdsec, db, identity, live, views, waflog
 from .config import settings
 from .security import LoginRequired
 
@@ -53,7 +53,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="portal", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app = FastAPI(title="OPNGate", version="2.0.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 app.include_router(auth.router)
 app.include_router(views.router)
@@ -133,3 +133,9 @@ async def login_required(request: Request, exc: LoginRequired):
         return JSONResponse({"error": "login required"}, status_code=401)
     target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
     return RedirectResponse(f"/login?next={quote(target, safe='')}", 303)
+
+
+@app.middleware("http")
+async def portal_identity(request: Request, call_next):
+    with identity.use(identity.for_request(request)):
+        return await call_next(request)

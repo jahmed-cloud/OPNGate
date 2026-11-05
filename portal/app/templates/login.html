@@ -3,6 +3,10 @@
 {% block content %}
 <section class="login card">
   <h1>{{ rp_name }}</h1>
+  <p class="muted">Your OPNsense gateway, in one place.</p>
+  {% if legacy_origin and portal_identity.origin == primary_origin %}
+  <p class="banner warn">Moved from the old address? <a href="{{ legacy_origin }}/login?next={{ primary_origin | urlencode }}%2F">Sign in there with your existing passkey</a>, or use your password and authenticator below. Add a passkey for this address under Account security.</p>
+  {% endif %}
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <p class="error hidden" id="passkey-error" role="alert"></p>
 

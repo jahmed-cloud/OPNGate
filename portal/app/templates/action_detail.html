@@ -3,6 +3,7 @@
 {% block content %}
 <section class="card narrow">
   <h1>{{ labels[a.type] }}</h1>
+  <p class="small muted">Check the target, scope and duration below, then approve with your security key. <a href="/help#approval">Approval and undo guide</a></p>
   <p>Status: <span class="status {{ a.status }}">{{ a.status | replace('_', ' ') }}</span> · created by {{ a.created_by }} {{ a.created_at | ago }} · expires {{ a.expires_at | ts }}</p>
   <h2>Exactly what you are signing</h2>
   <pre class="payload">{{ payload }}</pre>

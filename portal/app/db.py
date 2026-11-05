@@ -179,7 +179,7 @@ def connect() -> sqlite3.Connection:
 
 
 # Columns added after the first release; CREATE TABLE IF NOT EXISTS does not add them to old databases.
-MIGRATIONS = {"clients": (("down_bps", "REAL"), ("up_bps", "REAL"), ("paused", "INTEGER NOT NULL DEFAULT 0"),
+MIGRATIONS = {"credentials": (("rp_id", "TEXT"),), "clients": (("down_bps", "REAL"), ("up_bps", "REAL"), ("paused", "INTEGER NOT NULL DEFAULT 0"),
                           ("speed_limit", "TEXT"), ("blocked_domains", "TEXT"))}
 
 
@@ -191,6 +191,9 @@ def init() -> None:
         for name, decl in columns:
             if name not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+    from . import identity
+    previous = identity.legacy() or identity.primary()
+    conn.execute("UPDATE credentials SET rp_id=? WHERE rp_id IS NULL", (previous.rp_id,))
 
 
 @contextmanager

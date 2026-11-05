@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from . import db, notify, wa
 from .devices import BLOCK_LISTS
 from .config import settings
+from . import identity
 from .security import Session, audit, check_csrf, require_operator
 from .templating import render
 
@@ -244,8 +245,8 @@ def create(kind: str, params: dict, username: str) -> str:
         "created_by": username,
         "created_at": now,
         "expires_at": now + settings.action_ttl,
-        "rp_id": settings.rp_id,
-        "origin": settings.origin,
+        "rp_id": identity.current().rp_id,
+        "origin": identity.current().origin,
     })
     db.run(
         "INSERT INTO actions(id, type, params, payload, created_by, created_at, expires_at, status) "
@@ -260,7 +261,7 @@ def create(kind: str, params: dict, username: str) -> str:
 @router.get("/actions")
 def actions_page(request: Request, session: Session = Depends(require_operator)):
     rows = db.q("SELECT * FROM actions ORDER BY created_at DESC LIMIT 100")
-    has_key = db.one("SELECT 1 FROM credentials WHERE user_id=?", session.user_id) is not None
+    has_key = db.one("SELECT 1 FROM credentials WHERE user_id=? AND rp_id=?", session.user_id, identity.current().rp_id) is not None
     clients = db.q("SELECT c.mac, COALESCE(l.name, c.hostname) AS hostname, c.ip FROM clients c "
                    "LEFT JOIN device_labels l ON l.mac = c.mac ORDER BY 2")
     _, vpn = db.get_snapshot("vpn", [])
@@ -296,6 +297,13 @@ def _get(action_id: str):
     return row
 
 
+def _check_identity(row):
+    payload = json.loads(row["payload"])
+    here = identity.current()
+    if (payload.get("rp_id"), payload.get("origin")) != (here.rp_id, here.origin):
+        raise HTTPException(409, "Approve this action at the portal address where it was created")
+
+
 @router.get("/actions/{action_id}")
 def action_detail(action_id: str, request: Request, session: Session = Depends(require_operator)):
     row = _get(action_id)
@@ -325,6 +333,7 @@ async def undo(action_id: str, request: Request, session: Session = Depends(requ
 async def approve_begin(action_id: str, request: Request, session: Session = Depends(require_operator)):
     await check_csrf(request, session)
     row = _get(action_id)
+    _check_identity(row)
     if row["status"] != "pending_approval" or row["expires_at"] < db.now():
         raise HTTPException(409, "Action is not awaiting approval")
     options, _ = wa.authentication_options(user_id=session.user_id, challenge=digest(row["payload"]))
@@ -335,6 +344,7 @@ async def approve_begin(action_id: str, request: Request, session: Session = Dep
 async def approve_finish(action_id: str, request: Request, session: Session = Depends(require_operator)):
     await check_csrf(request, session)
     row = _get(action_id)
+    _check_identity(row)
     if row["status"] != "pending_approval" or row["expires_at"] < db.now():
         raise HTTPException(409, "Action is not awaiting approval")
     body = await request.json()

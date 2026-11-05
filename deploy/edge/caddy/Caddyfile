@@ -38,7 +38,7 @@
 	}
 }
 
-# OWASP Core Rule Set via Coraza. WAF_MODE=DetectionOnly for the first 7 days, then On, one site at a time
+# OWASP Core Rule Set via Coraza. Start in DetectionOnly, tune legitimate traffic, then enable On per site.
 # (give a site its own copy of this snippet with "SecRuleEngine On" to switch only that site).
 (waf) {
 	coraza_waf {
@@ -46,6 +46,10 @@
 		directives `
 			Include @coraza.conf-recommended
 			Include @crs-setup.conf.example
+			# Vaultwarden uses REST methods under /api/. Keep method enforcement
+			# on other sites/paths and inspect all Vaultwarden request payloads.
+			SecRule REQUEST_HEADERS:Host "@streq vault.{$DOMAIN}" "id:10001,phase:1,pass,nolog,chain"
+			SecRule REQUEST_URI "@beginsWith /api/" "t:none,setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE'"
 			Include @owasp_crs/*.conf
 			SecRuleEngine {$WAF_MODE}
 			SecAuditEngine RelevantOnly
@@ -77,7 +81,7 @@
 	}
 }
 
-waf.{$DOMAIN} {    # WAF-OPNsense portal
+{$PORTAL_HOSTS} {    # OPNGate; include the old hostname here during a migration
 	import access_log
 	route {
 		import cf_only

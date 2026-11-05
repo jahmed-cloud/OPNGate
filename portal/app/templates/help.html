@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Help & guides · {{ rp_name }}{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">Getting things done</p><h1>Help & guides</h1>
+  <p class="page-description">Choose what to block, approve the change, and check the result.</p></div></div>
+{% if not session.is_operator %}<p class="banner warn">Your account has viewer access. An operator can make the changes described below.</p>{% endif %}
+<section class="card" id="choose">
+  <h2>Choose the right control</h2>
+  <div class="scroll"><table><thead><tr><th>I want to…</th><th>Open</th><th>Choose</th></tr></thead><tbody>
+    <tr><td>Stop a device's network access</td><td><a href="/clients">Devices</a> → Manage</td><td>Pause internet</td></tr>
+    <tr><td>Block websites for one device</td><td><a href="/clients">Devices</a> → Manage</td><td>Block websites</td></tr>
+    <tr><td>Block websites for a whole network</td><td><a href="/networks">Networks</a></td><td>Block sites on that network</td></tr>
+    <tr><td>Block an external IP address</td><td>{% if session.is_operator %}<a href="/actions">Actions</a>{% else %}Actions (operator){% endif %}</td><td>Block an IP or CIDR</td></tr>
+    <tr><td>Limit a device's speed</td><td><a href="/clients">Devices</a> → Manage</td><td>Speed limit</td></tr>
+    <tr><td>Check automatically blocked web attacks</td><td><a href="/threats">Threats</a></td><td>WAF events</td></tr>
+  </tbody></table></div>
+</section>
+<div class="grid2">
+<section class="card" id="device">
+  <h2>Pause a device</h2>
+  <ol><li>Open <a href="/clients">Devices</a> and find the device by name or address.</li>
+    <li>Select <strong>Manage</strong>, then a duration under <strong>Pause internet</strong>: 15 min, 1 hour, or Until resumed.</li>
+    <li>Review the action and select <strong>Approve with security key</strong>.</li>
+    <li>Wait for the firewall result to show <strong>done</strong>. The device badge changes to Paused.</li></ol>
+  <p class="small muted">To restore access, open Manage → Resume internet and approve that change too. Protected management devices may be refused by the firewall.</p>
+</section>
+<section class="card" id="websites">
+  <h2>Block websites</h2>
+  <ol><li>For one device, open Devices → Manage → Block websites. For a whole subnet, open <a href="/networks">Networks</a> and select its <strong>Block sites</strong> menu.</li>
+    <li>Choose categories such as Ads or Social media, or enter domains such as <code>youtube.com</code>, separated by commas. Enter domains, without <code>https://</code> or a page path.</li>
+    <li>Choose a duration and select <strong>Block sites</strong>, then approve with your security key.</li>
+    <li>Allow about a minute for the firewall's DNS policy to apply. Reopen the site on the affected device.</li></ol>
+  <p class="small muted">Subdomains are included. Cached DNS, an app's own secure DNS or a VPN can affect the result. Existing network-wide DNS policies still apply after you remove an OPNGate policy.</p>
+</section>
+<section class="card" id="ip">
+  <h2>Block an external IP</h2>
+  <ol><li>Open {% if session.is_operator %}<a href="/actions?type=block_ip">Actions</a>{% else %}Actions as an operator{% endif %} and choose <strong>Block an IP or CIDR</strong>.</li>
+    <li>Enter the external address from the event you investigated and choose the duration.</li>
+    <li>Select <strong>Prepare for signing</strong>, check the address and select <strong>Approve with security key</strong>.</li>
+    <li>Wait for <strong>done</strong>. Actions shows <strong>in effect</strong> while the block is active.</li></ol>
+  <p class="small muted">For a local device, use Pause internet instead. The firewall refuses private/local IP blocks and protected targets.</p>
+</section>
+<section class="card" id="undo">
+  <h2>Remove a block or limit</h2>
+  <ul><li><strong>Paused device:</strong> Devices → Manage → Resume internet.</li>
+    <li><strong>Website policy:</strong> reopen its Block sites menu → Allow all sites again.</li>
+    <li><strong>Speed limit:</strong> Devices → Manage → Remove speed limit.</li>
+    <li><strong>IP block:</strong> Actions → find the active action → Undo.</li></ul>
+  <p>Approve the removal with your security key, then check the firewall result. Timed policies expire automatically; Until removed/Until resumed policies need an explicit removal.</p>
+</section>
+</div>
+<section class="card" id="approval">
+  <h2>What happens after approval?</h2>
+  <p><strong>Pending approval</strong> means the request has been prepared. <strong>Approved</strong> means your key signed it. <strong>Fetched</strong> means the firewall received it. <strong>Done</strong> is the reported completion; <strong>failed</strong> includes the firewall's reason.</p>
+  <p>The firewall checks for actions about every 15 seconds. Website policies can take about a minute to apply. A waiting badge is not proof the change is active. If delivery is interrupted, check the actual device/firewall state before repeating the request.</p>
+  <p class="small muted">Controls require an operator account, a passkey registered for this console address and its public key installed in the firewall trust store. Password/TOTP signs you in; control changes still require a security-key signature. If you moved hostnames, register a new passkey in <a href="/security">Account security</a>.</p>
+</section>
+<section class="card" id="waf">
+  <h2>WAF blocking is separate</h2>
+  <p>The WAF automatically inspects requests to the websites behind the edge proxy. In On mode it blocks requests that trigger its policy. <a href="/threats">Threats</a> shows the evidence. Device pause, website DNS policies and external IP blocks use the gateway controls above.</p>
+  <p class="small muted">The portal does not provide an unsigned switch for changing edge WAF rules. WAF tuning belongs to the edge administrator.</p>
+</section>
+{% endblock %}

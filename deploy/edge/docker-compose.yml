@@ -23,6 +23,7 @@ services:
     build: ./caddy
     environment:
       DOMAIN: ${DOMAIN:?set DOMAIN}
+      PORTAL_HOSTS: ${PORTAL_HOSTS:-waf.${DOMAIN}}
       PORTAL_UPSTREAM: ${SERVICES_HOST_IP:?set SERVICES_HOST_IP}:9443
       CROWDSEC_LAPI: http://${SERVICES_HOST_IP}:9080
       CROWDSEC_CADDY_KEY: ${CROWDSEC_CADDY_KEY:?set CROWDSEC_CADDY_KEY}

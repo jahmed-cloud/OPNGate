@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="page-head"><h1>Security</h1></div>
+{% if legacy_origin %}<p class="banner warn">Passkeys belong to an address. You are enrolling for <strong>{{ portal_identity.rp_id }}</strong>. Keep your old keys until sign-in and signed actions work at the new address.</p>{% endif %}
 {% if error %}<p class="banner bad">{{ error }}</p>{% endif %}
 {% if flash %}<p class="banner ok">{{ flash }}</p>{% endif %}
 <p class="error hidden" id="wa-error" role="alert"></p>
@@ -27,7 +28,7 @@
   {% if creds | length < 2 %}<p class="banner warn">Register at least two: one for daily use, one kept offline as a spare.</p>{% endif %}
   <table><thead><tr><th>Name</th><th>Added</th><th>Last used</th><th></th></tr></thead><tbody>
   {% for c in creds %}
-  <tr><td>{{ c.name }}</td><td>{{ c.created_at | ts }}</td><td>{{ c.last_used_at | ago }}</td>
+  <tr><td>{{ c.name }}{% if c.rp_id %}<div class="small muted">{{ c.rp_id }}</div>{% endif %}</td><td>{{ c.created_at | ts }}</td><td>{{ c.last_used_at | ago }}</td>
     <td>{% if session.mfa_fresh %}<form method="post" action="/security/passkey/{{ c.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Remove</button></form>{% endif %}</td></tr>
   {% else %}<tr><td colspan="4" class="muted">None yet.</td></tr>{% endfor %}
   </tbody></table>

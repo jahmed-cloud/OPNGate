@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% import "_device.html" as dev with context %}
+{% block title %}Networks · {{ rp_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><p class="eyebrow">Your gateway</p><h1>Networks</h1>
+    <p class="page-description">Your interfaces, connected devices and current traffic, together.</p></div>
+  <a class="button-link" href="/traffic">Traffic history</a>
+</div>
+<p class="small muted">To block websites for a subnet: <strong>Block sites → choose categories/domains → approve with security key</strong>. <a href="/help#websites">Website-blocking guide</a></p>
+{% if not console.agent_online %}<p class="banner warn">Waiting for fresh gateway telemetry. Last report {{ console.agent_last_seen | ts }}.</p>{% endif %}
+<p class="small muted" data-live-status>Connecting to one-second live rates…</p>
+<div class="network-grid">
+{% for net in console.networks %}
+<section class="card" data-refresh-section="network-{{ net.interface }}">
+  <div class="card-head"><div class="network-title">{{ interface_icon(net.name, net.interface, net.wan) }}
+    <div><h2>{{ net.name }}</h2><span class="small muted mono">{{ net.interface }}</span></div></div>
+    <span class="status">{{ 'Internet uplink' if net.wan else 'Inside network' }}</span></div>
+  <div class="network-summary">
+    <div><span class="label">Download</span><strong class="down" data-live-interface="{{ net.interface }}" data-live-rate="{{ 'rx_bps' if net.wan else 'tx_bps' }}">{{ net.down_bps | bps }}</strong></div>
+    <div><span class="label">Upload</span><strong class="up" data-live-interface="{{ net.interface }}" data-live-rate="{{ 'tx_bps' if net.wan else 'rx_bps' }}">{{ net.up_bps | bps }}</strong></div>
+  </div>
+  {% if not net.wan %}
+  <p><a href="/clients?segment={{ net.name | urlencode }}">{{ net.online_clients }} devices online</a><span class="muted small"> · {{ net.total_clients }} known</span></p>
+  <div class="network-meta">{% if net.blocks or net.name in net_blocks %}{{ dev.sites_badge(net.blocks, compact=True) }}{% else %}<span class="muted small">No extra site blocks</span>{% endif %}
+    {% if session.is_operator %}{{ dev.net_menu({'segment': net.name, 'name': net.interface, 'blocks': net.blocks}) }}{% endif %}</div>
+  {% else %}<div class="network-meta"><span class="muted small">Download enters the WAN; upload leaves it.</span></div>{% endif %}
+  <p class="small muted">Reported {{ net.reported_at | ts }}{% if net.stale %} · stale{% endif %}</p>
+</section>
+{% else %}<section class="card empty-state"><strong>No interfaces reported yet</strong><p>Networks appear after the firewall agent sends its first report.</p></section>{% endfor %}
+</div>
+<p class="chart-note">Rates cover traffic observed by the firewall. Devices and policy details refresh every 30 seconds.</p>
+{% endblock %}

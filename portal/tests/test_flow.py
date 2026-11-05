@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import db, metrics, views
+from app.console import overview as overview_module
 from app.main import app
 from app.config import settings
 from test_dashboard import sign_in
@@ -65,7 +66,7 @@ def test_collapsed_map_only_loads_counts_and_open_map_is_stable(browser, monkeyp
 
 def test_history_refresh_leaves_client_owned_flow_untouched(browser, monkeypatch):
     sign_in(browser)
-    monkeypatch.setattr(views, '_flow_data', lambda *a: pytest.fail('history rebuilt the flow map'))
+    monkeypatch.setattr(overview_module, '_flow_data', lambda *a: pytest.fail('history rebuilt the flow map'))
     response = browser.get('/', headers={'X-Auto-Refresh': '1'})
     assert response.status_code == 200
     assert 'data-client-owned data-refresh-section="overview-8" id="flow-panel"' in response.text

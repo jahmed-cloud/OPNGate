@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('portal/app/static/portal.js','utf8');
+const source = ['credentials','dom','live','ui','charts','flow'].map(name => fs.readFileSync(`portal/app/static/console/${name}.js`,'utf8')).join('\n') + fs.readFileSync('portal/app/static/portal.js','utf8');
 const handlers = new Map(), intervals = [], requests = [], streams = [];
 let now = 100000, frame = {revision:'1',reported_at:100,source:'live',stale:false,clients_stale:false,
   clients_reported_at:100,interfaces:[],wan:{rx_bps:1000,tx_bps:100},clients:[]};

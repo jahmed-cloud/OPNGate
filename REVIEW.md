@@ -1,8 +1,12 @@
 # Implementation review
 
+## OPNGate rebuild
+
+The 2.0 application separates backend workspace routers and browser workspaces, adds a current-only Networks view and authenticated console inventory API, scopes passkeys and signatures to explicit portal identities, and introduces a guided Windows deployment launcher with a scoped existing-stack update path. Existing session, mTLS, collection, history and action protocols are retained. See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for feature parity and tradeoffs.
+
 ## Current assessment
 
-This repository contains a gateway management portal plus a separate deployable WAF. Caddy/Coraza/OWASP CRS performs HTTP inspection; the portal provides authentication, telemetry and signed control workflows. Default WAF mode is DetectionOnly. Actual enforcement must be validated at the edge.
+This repository contains OPNGate, a gateway management console, plus a separate deployable WAF. Caddy/Coraza/OWASP CRS performs HTTP inspection; the portal provides authentication, telemetry and signed control workflows. Default WAF mode is DetectionOnly. Actual enforcement must be validated at the edge.
 
 The current Compose deployment uses Cloudflare-proxied DNS and WAN IPv4 forwarding to Caddy. Earlier design discussion of Cloudflare Tunnel and services ports 8000/8443 is historical; current external services ports are 9443/9444/9080. Follow [RUNBOOK.md](docs/RUNBOOK.md).
 

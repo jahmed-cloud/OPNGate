@@ -11,7 +11,7 @@ from urllib.parse import quote, urlparse
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from . import db, notify, wa
+from . import db, identity, notify, wa
 from .config import settings
 from .security import (
     Session,
@@ -193,7 +193,7 @@ def forward_auth(request: Request, role: str = "viewer"):
     original = f"{proto}://{host}{uri}" if host else "/"
     if session:
         return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
-    return RedirectResponse(f"{settings.origin}/login?next={quote(original, safe='')}", 302)
+    return RedirectResponse(f"{identity.current().origin}/login?next={quote(original, safe='')}", 302)
 
 
 # ------------------------------------------------------------------ step-up

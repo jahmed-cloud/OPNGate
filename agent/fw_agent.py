@@ -31,7 +31,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 log = logging.getLogger("fw-agent")
 
 DEFAULT_CONFIG = "/usr/local/etc/fw-agent/agent.json"
@@ -701,9 +701,18 @@ def verify_action(item, trusted, cfg, state, now=None):
         raise ActionRejected("wrong clientData type")
     if b64u_decode(client_data.get("challenge", "")) != hashlib.sha256(payload_str.encode("utf-8")).digest():
         raise ActionRejected("signature is not over this payload")
-    if client_data.get("origin") != acfg["origin"] or client_data.get("crossOrigin"):
+    # A hostname transition may explicitly allow another paired RP ID/origin.
+    # Never mix an origin from one identity with the RP ID from another.
+    portals = [(acfg["rp_id"], acfg["origin"])]
+    for portal in acfg.get("migration_portals", [])[:2]:
+        if isinstance(portal, dict) and isinstance(portal.get("rp_id"), str) and isinstance(portal.get("origin"), str):
+            portals.append((portal["rp_id"], portal["origin"]))
+    pair = (payload.get("rp_id"), payload.get("origin"))
+    if pair not in portals:
+        raise ActionRejected("payload for a different portal")
+    if client_data.get("origin") != pair[1] or client_data.get("crossOrigin"):
         raise ActionRejected("wrong origin")
-    if len(auth_data) < 37 or auth_data[:32] != hashlib.sha256(acfg["rp_id"].encode()).digest():
+    if len(auth_data) < 37 or auth_data[:32] != hashlib.sha256(pair[0].encode()).digest():
         raise ActionRejected("wrong relying party")
     flags = auth_data[32]
     if not (flags & FLAG_UP and flags & FLAG_UV):
@@ -718,8 +727,6 @@ def verify_action(item, trusted, cfg, state, now=None):
 
     if payload.get("v") != 1 or payload.get("id") != item.get("id"):
         raise ActionRejected("payload id mismatch")
-    if payload.get("rp_id") != acfg["rp_id"] or payload.get("origin") != acfg["origin"]:
-        raise ActionRejected("payload for a different portal")
     created, expires = payload.get("created_at"), payload.get("expires_at")
     if not isinstance(created, int) or not isinstance(expires, int):
         raise ActionRejected("bad timestamps")

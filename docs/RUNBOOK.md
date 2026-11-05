@@ -1,15 +1,20 @@
-# Deployment runbook
+# OPNGate deployment runbook
 
 Deploy read-only first and pass each gate before proceeding. Back up existing configurations. Commands below run on the named host; replace all example addresses/domains.
 
-## One-command setup
+## Guided deployment
+
+On Windows, double-click `Deploy.cmd`, or run `.\Deploy.ps1`. See [INSTALL.md](INSTALL.md) for the launcher, prerequisites and update behavior. Use Install for a new stack and Update for routine application changes. A hostname move follows [HOSTNAME_MIGRATION.md](HOSTNAME_MIGRATION.md).
+
+## Shell deployment
 
 `deploy/deploy.sh` automates sections 1 to 4 and 6 from your admin PC. Copy `deploy/deploy.conf.example` to
 `deploy/deploy.conf`, fill in the domain, box addresses, SSH key, ADMIN_IP and interface names, then:
 
 ```sh
 sh deploy/deploy.sh check      # SSH and Docker on every box
-sh deploy/deploy.sh all        # pki secrets services edge firewall hostfw user status
+sh deploy/deploy.sh all        # NEW installation: pki secrets services edge firewall hostfw user status
+sh deploy/deploy.sh update     # EXISTING compatible stack: application only
 sh deploy/deploy.sh keys       # after registering a passkey: trust it on the firewall
 ```
 
@@ -18,7 +23,11 @@ Steps can be rerun on their own. `secrets` fetches the `.env` files from boxes t
 only when rotating the CA). `hostfw` refuses to run unless the Pi sees your SSH session coming from ADMIN_IP.
 The gates below still apply: check each one before moving on.
 
-## One-second streaming upgrade
+## Earlier streaming and flow releases
+
+The asset versions and measurements in this section describe previous releases. Current OPNGate workspace assets are recorded in STATUS.md.
+
+### One-second streaming upgrade
 
 Follow [LIVE_STREAM.md](LIVE_STREAM.md): deploy the shared tmpfs volume and `PORTAL_LIVE_DIR` to both services, rebuild/recreate portal and ingest together, rebuild the matching edge shipper, and upgrade the agent while preserving local configuration/trust/state. Verify real browser SSE cadence through Cloudflare/WAF and confirm one-second device counters without one-second historical inserts. No Caddy, firewall-policy or shaping change is required. Assets: CSS 35 / JavaScript 22.
 
@@ -37,7 +46,7 @@ OPNsense agent -------- mutual TLS --------> Pi 4 ingest :9444
 Pi 5 / OPNsense CrowdSec clients ----------> Pi 4 LAPI :9080
 ```
 
-The supplied Compose files do not start cloudflared. The portal hostname is `waf.<DOMAIN>`. Caddy only trusts Cloudflare client-IP headers from listed Cloudflare ranges. Maintain those ranges against [Cloudflare's list](https://www.cloudflare.com/ips/). Local private-range peers are also allowed by the supplied edge matcher; restrict that exception if it is unnecessary.
+The supplied Compose files do not start cloudflared. New installations use `opngate.<DOMAIN>` through `PORTAL_SUBDOMAIN`; older installations retain their configured hostname until explicitly migrated. Caddy only trusts Cloudflare client-IP headers from listed Cloudflare ranges. Maintain those ranges against [Cloudflare's list](https://www.cloudflare.com/ips/). Local private-range peers are also allowed by the supplied edge matcher; restrict that exception if it is unnecessary.
 
 ## 1. PKI and service configuration
 
@@ -77,7 +86,7 @@ ssh root@10.10.0.1 'sh /tmp/agent/install.sh'
 scp deploy/pki/out/agent.crt deploy/pki/out/agent.key deploy/pki/out/ingest-ca.pem root@10.10.0.1:/usr/local/etc/fw-agent/
 ```
 
-Edit `/usr/local/etc/fw-agent/agent.json` on the firewall. Set portal_url to `https://10.10.0.22:9444`; set interfaces, gateway name, segment labels and optional telemetry sources to match your OPNsense version. Set action RP ID/origin to `waf.<DOMAIN>` / `https://waf.<DOMAIN>`. Keep `actions.enabled=false`.
+Edit `/usr/local/etc/fw-agent/agent.json` on the firewall. Set portal_url to `https://10.10.0.22:9444`; set interfaces, gateway name, segment labels and optional telemetry sources to match your OPNsense version. Set action RP ID/origin to your configured console hostname (new default `opngate.<DOMAIN>` / `https://opngate.<DOMAIN>`). Keep `actions.enabled=false`.
 
 ```sh
 python3 /usr/local/opnsense/scripts/fw-agent/fw_agent.py -c /usr/local/etc/fw-agent/agent.json --once
@@ -126,6 +135,8 @@ Configure Cloudflare DNS proxying and Full (strict) TLS. Point the required DNS 
 **Gate, from an external network:** the portal and admin apps require login; direct-origin connections are refused; `/internal/*` is refused; services ports are unreachable. Stop the portal briefly and verify admin forward-auth fails closed. Test allowed/denied east-west traffic and IPv6 independently. Protect HTTP-01 certificate issuance and verify renewals with your network policy.
 
 ## 5. Enable WAF enforcement carefully
+
+Follow [WAF.md](WAF.md) for the current Vaultwarden API method policy, controlled probe verification and rollback.
 
 Review detection events and application behavior for at least a normal operating cycle. Tune narrowly for legitimate requests: rules and exclusions live in the `(waf)` snippet of `deploy/edge/caddy/Caddyfile` (for example `SecRuleRemoveById 911100` for apps that use PUT), never in the portal. Set WAF_MODE=On and recreate Caddy, or copy the WAF snippet with explicit On for one site at a time.
 

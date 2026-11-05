@@ -1,2 +1,4 @@
-# Keep LF everywhere: the scripts and configs run on Linux/FreeBSD, and CRLF breaks them.
+# Keep LF for Linux/FreeBSD code and configuration. Windows launchers use CRLF.
 * text=auto eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf

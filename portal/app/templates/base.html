@@ -3,12 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="application-name" content="OPNGate">
+<meta name="description" content="OPNGate: your OPNsense networks, devices and security in one console.">
 <meta name="csrf" content="{{ csrf }}">
 <title>{% block title %}{{ rp_name }}{% endblock %}</title>
-<link rel="icon" href="/static/logo.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/portal.css?v=37">
+<link rel="icon" href="/static/logo.svg?v=2" type="image/svg+xml">
+<link rel="stylesheet" href="/static/portal.css?v=38">
 <script src="/static/theme.js?v=9"></script>
-<script src="/static/portal.js?v=24" defer></script>
+<script src="/static/console/credentials.js?v=1" defer></script>
+<script src="/static/console/dom.js?v=1" defer></script>
+<script src="/static/console/live.js?v=1" defer></script>
+<script src="/static/console/ui.js?v=1" defer></script>
+<script src="/static/console/charts.js?v=1" defer></script>
+<script src="/static/console/flow.js?v=1" defer></script>
+<script src="/static/portal.js?v=25" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -18,7 +26,7 @@
 <aside class="sidebar" aria-label="Sidebar">
   <a class="brand" href="/">
     <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path class="shield" d="M12 2.2 4.4 5v6.2c0 4.8 3.2 9 7.6 10.6 4.4-1.6 7.6-5.8 7.6-10.6V5z"/><path class="bricks" d="M7.6 9.4h8.8M7.6 13.2h8.8M8.6 17h6.8M12 5.6v3.8M9.6 9.4v3.8M14.4 9.4v3.8M12 13.2V17"/></svg>
-    <span>{{ rp_name }}</span>
+    <span class="brand-copy">{{ rp_name }}<small>Gateway console</small></span>
   </a>
   <nav aria-label="Main navigation">
     {% for section, items in nav %}
@@ -60,7 +68,7 @@
 {% block content %}{% endblock %}
 {% if not fragment %}
 </main>
-{% if session %}<footer class="app-footer">Gateway telemetry &amp; security operations <span>Times shown in {{ tz_name }}</span></footer>{% endif %}
+{% if session %}<footer class="app-footer">OPNGate · Gateway operations <span>Times shown in {{ tz_name }}</span></footer>{% endif %}
 </div>
 </div>
 </body>

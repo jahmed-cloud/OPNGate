@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('portal/app/static/portal.js','utf8');
+const source = ['credentials','dom','live','ui','charts','flow'].map(name => fs.readFileSync(`portal/app/static/console/${name}.js`,'utf8')).join('\n') + fs.readFileSync('portal/app/static/portal.js','utf8');
 const devicesContext={}; vm.createContext(devicesContext);
 vm.runInContext(source.slice(source.indexOf('function matchingLiveClient'),source.indexOf('// Real observations')),devicesContext);
 const client={mac:'00:11:22:33:44:55',ip:'192.0.2.10',segment:'LAN',down_bps:8000};

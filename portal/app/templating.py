@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
-from . import devices, interface_icons
+from . import devices, identity, interface_icons
 from .config import settings
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -21,13 +21,15 @@ _tz = contextvars.ContextVar("tz", default=timezone.utc)
 
 NAV = [
     ("Monitor", [("/", "Overview", "overview"), ("/traffic", "Traffic", "traffic"), ("/dns", "DNS", "dns"), ("/vpn", "VPN", "vpn")]),
-    ("Network", [("/clients", "Clients", "clients")]),
+    ("Network", [("/networks", "Networks", "networks"), ("/clients", "Devices", "clients")]),
     ("Security", [("/threats", "Threats", "threats"), ("/alerts", "Alerts", "alerts")]),
     ("Control", [("/actions", "Actions", "actions")]),
-    ("Admin", [("/audit", "Audit log", "audit"), ("/security", "Account security", "security")]),
+    ("Admin", [("/audit", "Audit log", "audit"), ("/help", "Help & guides", "help"), ("/security", "Account security", "security")]),
 ]
 # 24x24 stroke icons for the drawer.
 NAV_ICONS = {
+    "help": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9a2.5 2.5 0 1 1 4 2L12 12v2M12 17h.01",
+    "networks": "M9 3h6v5H9zM3 16h6v5H3zM15 16h6v5h-6zM12 8v4M6 16v-4h12v4",
     "overview": "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
     "traffic": "M3 17l6-6 4 4 8-8M15 7h6v6",
     "dns": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.4 2.5 3.6 5.5 3.6 9s-1.2 6.5-3.6 9c-2.4-2.5-3.6-5.5-3.6-9S9.6 5.5 12 3z",
@@ -87,6 +89,9 @@ def render(request, name: str, status_code: int = 200, **ctx):
     ctx["path"] = request.url.path
     ctx["nav"], ctx["nav_current"] = _nav(ctx["path"], bool(session and session.is_operator))
     ctx["rp_name"] = settings.rp_name
+    ctx["portal_identity"] = identity.current()
+    ctx["legacy_origin"] = settings.legacy_origin
+    ctx["primary_origin"] = settings.origin
     # Live requests only need page content. Auth is still enforced by the route.
     ctx["fragment"] = bool(session and ctx.get("refresh") and request.headers.get("X-Auto-Refresh") == "1")
     response = templates.TemplateResponse(request, name, ctx, status_code=status_code)
