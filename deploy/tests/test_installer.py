@@ -36,6 +36,10 @@ case "$*" in *"controller.py ${FAIL_STAGE:-never} "*)
   case "$*" in *"${FAIL_ON_HOST:-never}"*) exit 8 ;; esac ;;
 esac
 case "$*" in *'/bin/sh -s -- /opt/gateway '*)
+  if [ "${EXECUTE_DETECTION:-no}" = yes ]; then
+    for last_arg do :; done
+    exec sh -s -- "$DETECTION_ROOT" "$last_arg"
+  fi
   case "$*" in *root@edge.example*) echo "${EDGE_STACK_STATE:-existing}" ;; *) echo "${SERVICES_STACK_STATE:-existing}" ;; esac ;;
 esac
 case "$*" in *'docker compose ps --status running -q'*) echo 3 ;; *'docker compose ps'*) echo 'portal: running' ;; esac
@@ -56,6 +60,8 @@ case "$*" in
  *) printf 200 ;;
 esac
 ''',
+      'docker':'#!/bin/sh\nexit 7\n',
+      'ls':'#!/bin/sh\n[ "${FAIL_LISTING:-no}" != yes ] || exit 8\nexec /usr/bin/ls "$@"\n',
     }
     for name,body in scripts.items():
         p=bins/name;p.write_text(body,encoding='utf-8',newline='\n');p.chmod(0o755)
@@ -118,6 +124,15 @@ def test_install_refuses_existing_stack(setup):
     result,log=run('all')
     assert result.returncode!=0 and 'Install refuses' in result.stderr
     assert 'portal_rules.php' not in log and 'gen-key' not in log
+
+
+@pytest.mark.parametrize('fail_listing',['yes','no'])
+def test_failed_remote_listing_never_selects_fresh_install(setup,fail_listing):
+    root,_,run=setup
+    empty=root/'empty-remote';empty.mkdir()
+    result,log=run('deploy',EXECUTE_DETECTION='yes',DETECTION_ROOT=shell_path(empty),FAIL_LISTING=fail_listing)
+    assert result.returncode!=0 and 'could not inspect services' in result.stderr
+    assert 'gen-key' not in log and 'controller.py' not in log
 
 
 def test_second_host_build_failure_rolls_back_before_any_activation(setup):

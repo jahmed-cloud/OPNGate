@@ -286,13 +286,14 @@ set -eu
 root=$1; role=$2
 if [ -f "$root/deploy/$role/.env" ] && [ -f "$root/deploy/$role/docker-compose.yml" ]; then
   printf 'existing\n'
-elif [ -e "$root" ] && [ -n "$(ls -A "$root")" ]; then
-  printf 'partial\n'
-elif [ -n "$(docker ps -a -q --filter "label=com.docker.compose.project=gw-$role")" ]; then
-  printf 'partial\n'
-else
-  printf 'empty\n'
+  exit 0
 fi
+if [ -e "$root" ]; then
+  contents=$(ls -A "$root") || exit 1
+  if [ -n "$contents" ]; then printf 'partial\n'; exit 0; fi
+fi
+containers=$(docker ps -a -q --filter "label=com.docker.compose.project=gw-$role") || exit 1
+if [ -n "$containers" ]; then printf 'partial\n'; else printf 'empty\n'; fi
 EOF
 }
 
@@ -310,6 +311,7 @@ detect_stack() {
 remote_stage() { # host role stage [sha256]
   host=$1; role=$2; stage=$3
   extra=; [ -z "${4:-}" ] || extra=" --sha256 $4"
+  printf '   %s: %s\n' "$role" "$stage"
   ssh_cmd "$host" "python3 $REMOTE_DIR/releases/$release_id/controller.py $stage $REMOTE_DIR $release_id $role$extra"
 }
 

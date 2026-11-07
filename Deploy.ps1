@@ -113,8 +113,6 @@ try {
     if (-not $BashPath -or -not (Test-Path -LiteralPath $BashPath -PathType Leaf)) { throw 'Install Git for Windows, or pass -BashPath to its bash.exe.' }
     $gitRoot = Split-Path -Parent (Split-Path -Parent $BashPath)
     $env:PATH = "$gitRoot\usr\bin;$gitRoot\mingw64\bin;$env:PATH"
-    $previousConf = $env:DEPLOY_CONF
-    $env:DEPLOY_CONF = ConvertTo-PosixPath $ConfigPath
     if ($Action -eq 'Rollback') {
         if (-not $ReleaseId -and -not $NonInteractive) { $ReleaseId = Read-Host 'Release ID printed by the deployment' }
         if ($ReleaseId -notmatch '^opngate-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$') { throw 'Rollback requires a valid -ReleaseId from the deployment output.' }
@@ -122,7 +120,9 @@ try {
     $commands = @{'Deploy'='deploy';'Install'='all';'Update'='update';'Rollback'='rollback';'Check'='check';'Status'='status'}
     $deploymentArguments = @($commands[$Action])
     if ($Action -eq 'Rollback') { $deploymentArguments += $ReleaseId }
+    $previousConf = $env:DEPLOY_CONF
     try {
+        $env:DEPLOY_CONF = ConvertTo-PosixPath $ConfigPath
         & $BashPath --noprofile --norc (ConvertTo-PosixPath (Join-Path $deploymentRoot 'deploy\deploy.sh')) @deploymentArguments
         if ($LASTEXITCODE -ne 0) { throw "Deployment stopped with exit code $LASTEXITCODE. Fix the reported step before retrying." }
     } finally { $env:DEPLOY_CONF = $previousConf }
