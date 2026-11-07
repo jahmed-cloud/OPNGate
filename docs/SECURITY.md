@@ -38,3 +38,11 @@ For a suspected vulnerability, use GitHub private vulnerability reporting if ena
 ## Current-state feed
 
 `/v1/live` is available only on the existing mTLS ingest listener. `/api/live` requires a valid portal session even for unchanged revisions, and only returns display telemetry. Polling does not extend the idle timeout; the live transport has no action or privilege-changing capability. No dashboard/API responses are publicly cacheable. Browser graphs retain at most 180 live observations in memory and expose their freshness. Background CrowdSec cache errors never imply that bans are absent; last-known snapshots are explicitly labeled.
+
+## Browser request and authentication budgets
+
+Browser POST/PUT/PATCH/DELETE bodies are limited to 128 KiB before form/JSON parsing, including bodies without Content-Length. Invalid WebAuthn envelopes return 400; oversized browser bodies return 413. GET/SSE and WebSockets are not buffered. The exact internal WAF batch endpoint retains its separate authenticated two-MiB budget and source/token checks.
+
+Authentication rate-limit state is capped at 4,096 IP/account records per portal process, with inactive expiry and active-lockout preservation. New identities wait when capacity is full. This state resets on restart and is not a shared or distributed limiter. The current Argon2 login path still needs controlled concurrency measurements on target hardware.
+
+Relogin revokes the presented old session atomically when creating the replacement; other device sessions remain valid. Monotonic WebAuthn counter updates use a conditional write to reject stale concurrent verification. Authenticators with no counter remain supported and rely on the existing single-use challenges and signature validation. See the [assessment results](SECURITY_ASSESSMENT.md) for verification boundaries and the revised test plan.

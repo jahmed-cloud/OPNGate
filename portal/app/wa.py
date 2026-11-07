@@ -122,7 +122,10 @@ def finish_authentication(credential: dict, challenge: bytes, user_id: Optional[
         )
     except Exception as exc:
         raise WebAuthnError(str(exc)) from exc
-    db.run("UPDATE credentials SET sign_count=?, last_used_at=? WHERE id=?", verified.new_sign_count, db.now(), cred_id)
+    updated = db.run("UPDATE credentials SET sign_count=?, last_used_at=? WHERE id=? AND sign_count=?",
+                     verified.new_sign_count, db.now(), cred_id, cred["sign_count"])
+    if updated.rowcount != 1:
+        raise WebAuthnError("credential changed during verification; try again")
     return user, cred_id
 
 

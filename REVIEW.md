@@ -44,3 +44,7 @@ The regression suite includes live API authorization/revisions/fallback/stalenes
 ## Network flow and adjacent UI review
 
 Map rates/activity and Traffic bandwidth bars now follow the two-second feed. The map has its own authenticated, history-free fragment endpoint for 30-second device updates and expansion. History responses leave the mounted map untouched; superseded map requests are cancelled and discarded. Device lists are bounded to eight per expanded network in stable MAC order; collapsed networks load counts only. Device animation is removed, while trunk animation respects pause/hidden/stale state. Map timeout failures have local retry feedback. Validation: 94 Python tests and JavaScript syntax/DOM regression checks passed. Runtime observations and rollback locations are recorded in docs/STATUS.md.
+
+## November 8 security follow-up
+
+The revised [security assessment](docs/SECURITY_ASSESSMENT.md) records the 2.0.1 authentication hardening, local regression coverage and pending external checks. It supersedes the November 6 pentest draft’s backend, CSP and origin-bypass assumptions. Earlier test counts and runtime observations above describe their respective releases.

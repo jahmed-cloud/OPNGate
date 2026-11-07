@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from . import actions, auth, crowdsec, db, identity, live, views, waflog
 from .config import settings
 from .security import LoginRequired
+from .requests import BrowserBodyLimit
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -53,7 +54,8 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="OPNGate", version="2.0.0", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app = FastAPI(title="OPNGate", version="2.0.1", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app.add_middleware(BrowserBodyLimit)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 app.include_router(auth.router)
 app.include_router(views.router)

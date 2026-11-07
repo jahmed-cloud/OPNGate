@@ -1,6 +1,6 @@
 # OPNGate project status
 
-Updated: 2026-11-05 (Asia/Calcutta).
+Updated: 2026-11-08 (Asia/Calcutta).
 
 ## User preferences
 
@@ -19,6 +19,10 @@ WAF enforcement is enabled in the private edge environment (`WAF_MODE=On`). A na
 
 The existing community topic was rewritten as “OPNGate: a self-hosted OPNsense gateway console” and includes two earlier-release reference screenshots with sample data and an explicit historical caption. No private telemetry or configuration was published. See COMMUNITY_POST.md.
 
+## Security follow-up (2.0.1)
+
+The November 8 source review adds bounded browser request parsing, typed WebAuthn envelopes, bounded limiter state, conditional passkey-counter updates and atomic replacement of the presented login session. The pentest plan now reflects the actual Python/FastAPI architecture and separates local evidence from untested external exposure. See [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md). Local validation passes: 153 Python tests, JavaScript syntax and the DOM/stream harnesses. Deployment is pending; the earlier release evidence below remains dated November 5.
+
 ## Deployment and validation
 
 - Portal and ingest on the services Pi, matching edge WAF shipper, and the hostname/action-identity agent update are deployed with the existing database, credentials and native firewall policy preserved.
@@ -36,5 +40,6 @@ The existing community topic was rewritten as “OPNGate: a self-hosted OPNsense
 - A clean hardware install using the guided launcher; automated installer checks use simulated hosts.
 - Performance during sustained multi-viewer use and an actual speed test. Prior one-second production measurements remain documented in LIVE_STREAM.md/PERFORMANCE.md; no new speed test is run automatically.
 - Coraza serial audit-log rotation/retention and reliable offset handling across rename/replace rotation.
+- External origin/IPv6/services-listener verification and controlled authentication-load measurements in the revised pentesting plan.
 - Existing action-delivery interruption and DHCP address-reassignment limitations documented in SECURITY.md.
 - Collection runs at a nominal one-second interval; subsecond end-to-end delivery is not promised.

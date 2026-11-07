@@ -75,46 +75,78 @@ def audit(event: str, ok: bool, request: Optional[Request] = None, username: str
 # ---------------------------------------------------------------- rate limiting
 
 class RateLimiter:
-    """5 attempts per minute per key, plus a lockout that doubles after each failure past 5.
+    """Per-IP/account attempts and backoff, with bounded process-local state.
 
-    In-memory on purpose: the portal runs as one process, and CrowdSec (reading the
-    auth log) provides the durable, network-level ban after 10 failures.
+    Active lockouts are never evicted to admit new identities. When capacity is
+    full, new identities wait instead of allocating more entries. Inactive
+    records expire after the longest lockout plus a rolling-window allowance.
+    CrowdSec provides the separate durable network-level ban.
     """
 
-    def __init__(self, per_minute: int = 5, free_failures: int = 5, base_lock: int = 30, max_lock: int = 3600):
+    def __init__(self, per_minute: int = 5, free_failures: int = 5, base_lock: int = 30,
+                 max_lock: int = 3600, max_keys: int = 4096):
+        if min(per_minute, base_lock, max_lock, max_keys) < 1 or free_failures < 0:
+            raise ValueError("invalid rate limiter settings")
         self.per_minute = per_minute
         self.free_failures = free_failures
         self.base_lock = base_lock
         self.max_lock = max_lock
+        self.max_keys = max_keys
+        self.retention = max(120, max_lock + 60)
         self._attempts = defaultdict(deque)
         self._failures = defaultdict(int)
         self._locked_until = defaultdict(float)
+        self._touched = {}
+        self._last_prune = float("-inf")
         self._lock = threading.Lock()
+
+    def _prune(self, now):
+        if now - self._last_prune < 60:
+            return
+        self._last_prune = now
+        for key, stamp in list(self._touched.items()):
+            if now - stamp > self.retention and self._locked_until.get(key, 0) <= now:
+                for table in (self._attempts, self._failures, self._locked_until, self._touched):
+                    table.pop(key, None)
 
     def check(self, *keys: str) -> int:
         """Return 0 if allowed (and record the attempt), else seconds to wait."""
         now = time.monotonic()
+        keys = tuple(dict.fromkeys(keys))
         with self._lock:
+            self._prune(now)
             wait = 0
             for key in keys:
-                attempts = self._attempts[key]
-                while attempts and now - attempts[0] > 60:
-                    attempts.popleft()
-                if len(attempts) >= self.per_minute:
-                    wait = max(wait, int(60 - (now - attempts[0])) + 1)
-                if self._locked_until[key] > now:
-                    wait = max(wait, int(self._locked_until[key] - now) + 1)
+                if key in self._touched:
+                    self._touched[key] = now
+                attempts = self._attempts.get(key)
+                if attempts is not None:
+                    while attempts and now - attempts[0] > 60:
+                        attempts.popleft()
+                    if len(attempts) >= self.per_minute:
+                        wait = max(wait, int(60 - (now - attempts[0])) + 1)
+                until = self._locked_until.get(key, 0)
+                if until > now:
+                    wait = max(wait, int(until - now) + 1)
             if wait:
                 return wait
+            missing = sum(key not in self._touched for key in keys)
+            if len(self._touched) + missing > self.max_keys:
+                return 60
             for key in keys:
+                self._touched[key] = now
                 self._attempts[key].append(now)
             return 0
 
     def failure(self, *keys: str) -> None:
         now = time.monotonic()
         with self._lock:
-            for key in keys:
-                self._failures[key] += 1
+            self._prune(now)
+            for key in dict.fromkeys(keys):
+                if key not in self._touched and len(self._touched) >= self.max_keys:
+                    continue
+                self._touched[key] = now
+                self._failures[key] = min(self._failures.get(key, 0) + 1, self.free_failures + 32)
                 extra = self._failures[key] - self.free_failures
                 if extra >= 0:
                     self._locked_until[key] = now + min(self.base_lock * (2 ** extra), self.max_lock)
@@ -273,12 +305,16 @@ def create_session(request: Request, user_row) -> str:
     """New random session ID at every login; any session ID the browser had is discarded."""
     token = secrets.token_urlsafe(32)
     now = db.now()
-    db.run(
-        "INSERT INTO sessions(id_hash, user_id, csrf, created_at, last_seen, last_mfa, ip, user_agent) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        _hash_token(token), user_row["id"], secrets.token_urlsafe(32), now, now, now,
-        client_ip(request), request.headers.get("user-agent", "")[:300],
-    )
+    with db.tx() as conn:
+        conn.execute(
+            "INSERT INTO sessions(id_hash, user_id, csrf, created_at, last_seen, last_mfa, ip, user_agent) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (_hash_token(token), user_row["id"], secrets.token_urlsafe(32), now, now, now,
+             client_ip(request), request.headers.get("user-agent", "")[:300]),
+        )
+        old = request.cookies.get(settings.session_cookie)
+        if old:
+            conn.execute("DELETE FROM sessions WHERE id_hash=?", (_hash_token(old),))
     _note_device(request, user_row)
     return token
 

@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from . import db, identity, notify, wa
 from .config import settings
+from .requests import credential_body
 from .security import (
     Session,
     audit,
@@ -155,7 +156,7 @@ async def passkey_begin(request: Request):
 @router.post("/auth/passkey/finish")
 async def passkey_finish(request: Request):
     await check_origin_only(request)
-    body = await request.json()
+    body = await credential_body(request)
     keys = rate_keys(request)
     row = take_challenge(request, "login")
     if not row:
@@ -211,7 +212,7 @@ async def stepup_begin(request: Request, session: Session = Depends(require_user
 @router.post("/security/stepup/passkey/finish")
 async def stepup_finish(request: Request, session: Session = Depends(require_user)):
     await check_csrf(request, session)
-    body = await request.json()
+    body = await credential_body(request)
     row = take_challenge(request, "stepup")
     if not row or row["user_id"] != session.user_id:
         raise HTTPException(400, "Challenge expired; try again")
@@ -253,7 +254,7 @@ def _require_fresh(session: Session) -> None:
 @router.get("/security")
 def security_page(request: Request, session: Session = Depends(require_user)):
     user = db.one("SELECT * FROM users WHERE id=?", session.user_id)
-    creds = db.q("SELECT id, name, alg, created_at, last_used_at FROM credentials WHERE user_id=? ORDER BY created_at", session.user_id)
+    creds = db.q("SELECT id, name, alg, created_at, last_used_at, rp_id FROM credentials WHERE user_id=? ORDER BY created_at", session.user_id)
     codes_left = db.one("SELECT COUNT(*) AS n FROM recovery_codes WHERE user_id=? AND used_at IS NULL", session.user_id)["n"]
     return render(
         request, "security.html", session=session, user=user, creds=creds, codes_left=codes_left,
@@ -277,7 +278,7 @@ async def register_begin(request: Request, session: Session = Depends(require_us
 async def register_finish(request: Request, session: Session = Depends(require_user)):
     await check_csrf(request, session)
     _require_fresh(session)
-    body = await request.json()
+    body = await credential_body(request)
     row = take_challenge(request, "register")
     if not row or row["user_id"] != session.user_id:
         raise HTTPException(400, "Challenge expired; try again")

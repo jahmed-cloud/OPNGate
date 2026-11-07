@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from . import db, notify, wa
 from .devices import BLOCK_LISTS
 from .config import settings
+from .requests import credential_body
 from . import identity
 from .security import Session, audit, check_csrf, require_operator
 from .templating import render
@@ -347,7 +348,7 @@ async def approve_finish(action_id: str, request: Request, session: Session = De
     _check_identity(row)
     if row["status"] != "pending_approval" or row["expires_at"] < db.now():
         raise HTTPException(409, "Action is not awaiting approval")
-    body = await request.json()
+    body = await credential_body(request)
     credential = body.get("credential", {})
     try:
         wa.finish_authentication(credential, digest(row["payload"]), user_id=session.user_id)
