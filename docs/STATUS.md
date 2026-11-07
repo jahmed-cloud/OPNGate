@@ -21,9 +21,9 @@ The existing community topic was rewritten as “OPNGate: a self-hosted OPNsense
 
 ## Security follow-up (2.0.1)
 
-The November 8 source review adds bounded browser request parsing, typed WebAuthn envelopes, bounded limiter state, conditional passkey-counter updates and atomic replacement of the presented login session. The pentest plan now reflects the actual Python/FastAPI architecture and separates local evidence from untested external exposure. See [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md). Local validation passes: 153 Python tests, JavaScript syntax and the DOM/stream harnesses. Deployment is pending; the earlier release evidence below remains dated November 5.
+The November 8 source review adds bounded browser request parsing, typed WebAuthn envelopes, bounded limiter state, conditional passkey-counter updates and atomic replacement of the presented login session. The pentest plan now reflects the actual Python/FastAPI architecture and separates local evidence from untested external exposure. See [SECURITY_ASSESSMENT.md](SECURITY_ASSESSMENT.md). Local validation passes: 153 Python tests, JavaScript syntax and the DOM/stream harnesses. Source commit `fd905cc` is deployed to portal/ingest and the matching edge shipper. Deployed security-file hashes match; read-only image imports passed. Normal login/health returned 200, protected live endpoints returned 401 without a session, five live revisions advanced with 0.55–0.95-second sample ages, and shipper contact was 22.47 seconds old. Updated containers had zero restarts and portal/ingest had no recent error lines at the smoke check. WAF remains On; the agent and private native settings were not changed. Rollback source/images are retained under `/opt/gateway/releases/opngate-security-20261108`, with a private SQLite backup in the services volume. Physical-key login/control confirmation and sustained-load checks remain open. The earlier release evidence below remains dated November 5.
 
-## Deployment and validation
+## Deployment and validation (November 5 release)
 
 - Portal and ingest on the services Pi, matching edge WAF shipper, and the hostname/action-identity agent update are deployed with the existing database, credentials and native firewall policy preserved.
 - Current browser assets: CSS 38; bootstrap JavaScript 25; browser workspace scripts version 1.

@@ -44,9 +44,9 @@ A missing `security.txt` is an optional reporting-channel improvement, not proof
 
 | Evidence | Result | Limits |
 | --- | --- | --- |
-| November 8 source review and local regressions | Authentication parser, body-budget, limiter-state, session-replacement and passkey-counter fixes implemented | Synthetic users and local services; not a complete external pentest |
+| November 8 source review and local regressions | Authentication parser, body-budget, limiter-state, session-replacement and passkey-counter fixes deployed from `fd905cc`; 153 local tests pass | Synthetic users and local services; not a complete external pentest |
 | November 8 normal public login GET | 200 through Cloudflare; no-store, CSP, HSTS and nosniff present | Does not establish all routes, direct-origin rejection or authenticated behavior |
-| November 8 read-only host inspection | Caddy configured with WAF mode On; portal, ingest and shipper running | Configuration and heartbeat alone do not prove a request was blocked |
+| November 8 deployment/read-only checks | Portal, ingest and matching shipper updated; deployed security-file hashes match `fd905cc`; current frames advance and shipper contact is fresh; Caddy remains On | Configuration and heartbeat alone do not prove a request was blocked |
 | November 5 controlled WAF check, recorded previously | XSS test changed from 200 in DetectionOnly to 403 with Coraza interruption evidence in On mode | Historical point-in-time evidence; not rerun as an active scan in this review |
 | External direct-origin and IPv6/service exposure | Pending | Requires an owner-controlled public test host and known origin address |
 | Real physical-key controls and authenticated app compatibility | Pending normal-use verification | Software signatures and unauthenticated HTTP checks do not replace these workflows |

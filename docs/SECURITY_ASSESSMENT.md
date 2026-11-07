@@ -23,7 +23,9 @@ Source: `portal/app/requests.py`, `security.py`, `wa.py`, `auth.py`, `actions.py
 - Complete local validation: 153 Python tests pass across portal and installer suites, including 28 new assessment regressions. JavaScript syntax and existing DOM/stream harnesses pass. One pre-existing Starlette/httpx deprecation warning remains. No CI workflow is configured; these are local results.
 - Normal November 8 public login request returned 200 through Cloudflare, with no-store, CSP, HSTS and nosniff. CSP allows self plus the configured HTTPS sibling domain for forward-auth; it is not `form-action *`.
 - Read-only host checks confirmed the existing On WAF configuration and running services. The previously recorded November 5 blocked probe remains historical enforcement evidence; no new active production scan was run.
-- Deployment of this follow-up: pending.
+- Deployed source commit: `fd905cc`. Portal and ingest were rebuilt/recreated on the services Pi; the matching WAF shipper was rebuilt/recreated on the edge Pi. Critical deployed file hashes match that commit; the image imports also passed with a read-only filesystem.
+- Post-deploy normal GET checks: `/login` and `/healthz` returned 200; unauthenticated JSON requests to `/api/live` and `/api/live/stream` returned 401, with no-store and security headers. No production authentication payloads were submitted.
+- Five subsequent live snapshots produced five distinct revisions with ages 0.55–0.95 seconds. Shipper contact was 22.47 seconds old. Portal/ingest recent-log error counts and all updated container restart counts were zero at the short smoke check. Caddy retained its previous running instance and WAF mode On. This is a point-in-time smoke check, not a sustained-load benchmark.
 
 ## Operational tradeoffs and remaining work
 
@@ -38,3 +40,5 @@ External origin rejection, IPv6/service isolation, real hardware action approval
 Build/recreate only portal and ingest on the services host and the matching WAF shipper on the edge host. Save the prior source and image tags first. Preserve private environment files, database/key volumes, certificates, Caddy policy and native firewall settings. No firewall-agent rollout is needed for these portal-only changes.
 
 After deployment, verify normal login/read-only auth guards, live-frame freshness, shipper contact and container stability. Do not run real-account lockout or malformed-request experiments as a production smoke test. Roll back to the saved source/images if login availability, telemetry delivery or WAF shipping regresses; do not restore a stale database over newly recorded activity for this code-only change. Physical-key login and signed controls still need the owner’s normal-use check.
+
+Rollback evidence is retained privately under `/opt/gateway/releases/opngate-security-20261108` on both Pis. Image tags are `opngate-services-portal:before-security-20261108`, `opngate-services-ingest:before-security-20261108` and `opngate-edge-shipper:before-security-20261108`. The SQLite backup remains in the services data volume with mode 0600. The firewall agent, native MGMT settings, keys and edge policy were not changed.
