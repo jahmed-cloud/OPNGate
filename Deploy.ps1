@@ -9,10 +9,11 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu','Configure','Install','Update','Check','Status')]
-    [string]$Action = 'Menu',
+    [ValidateSet('Deploy','Menu','Configure','Install','Update','Rollback','Check','Status')]
+    [string]$Action = 'Deploy',
     [string]$ConfigPath,
     [string]$BashPath,
+    [string]$ReleaseId,
     [switch]$NonInteractive,
     [switch]$NoPause
 )
@@ -43,7 +44,7 @@ function New-DeploymentConfig {
     }
     if ($NonInteractive) { throw "Missing $ConfigPath. Run Configure interactively first." }
     Write-Host "`nFirst-time setup: values stay in your ignored deploy.conf file." -ForegroundColor Cyan
-    Write-Host 'Prepare SSH key login as root, trust each host fingerprint, and install Docker Compose on both Linux hosts first.'
+    Write-Host 'Prepare root SSH key login, verify host fingerprints, and install Docker Compose and Python 3.9+ on both Linux hosts first.'
     Write-Host 'The firewall remains responsible for routing. Configure proxied DNS and port forwarding before installing the edge.'
     $ip = '^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'
     $domain = Read-Setting 'Parent DNS domain' '' '^(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?\.[a-zA-Z]{2,}$'
@@ -90,13 +91,15 @@ try {
     if ($Action -eq 'Menu') {
         if ($NonInteractive) { throw 'Choose an explicit -Action for non-interactive use.' }
         Write-Host "`nOPNGate deployment" -ForegroundColor Cyan
-        Write-Host '1  Configure only'
-        Write-Host '2  Check prerequisites and connections'
-        Write-Host '3  Install a new three-host stack'
-        Write-Host '4  Update the application on an existing stack'
-        Write-Host '5  Check running services'
-        $choice = Read-Host 'Choose 1-5'
-        $menu = @{'1'='Configure';'2'='Check';'3'='Install';'4'='Update';'5'='Status'}
+        Write-Host '1  Deploy (detect a new or existing stack)'
+        Write-Host '2  Configure only'
+        Write-Host '3  Check prerequisites and connections'
+        Write-Host '4  Install a new three-host stack'
+        Write-Host '5  Update the application on an existing stack'
+        Write-Host '6  Check running services'
+        Write-Host '7  Roll back an application update'
+        $choice = Read-Host 'Choose 1-7'
+        $menu = @{'1'='Deploy';'2'='Configure';'3'='Check';'4'='Install';'5'='Update';'6'='Status';'7'='Rollback'}
         if (-not $menu.ContainsKey($choice)) { throw 'No action selected.' }
         $Action = $menu[$choice]
     }
@@ -112,9 +115,15 @@ try {
     $env:PATH = "$gitRoot\usr\bin;$gitRoot\mingw64\bin;$env:PATH"
     $previousConf = $env:DEPLOY_CONF
     $env:DEPLOY_CONF = ConvertTo-PosixPath $ConfigPath
-    $commands = @{'Install'='all';'Update'='update';'Check'='check';'Status'='status'}
+    if ($Action -eq 'Rollback') {
+        if (-not $ReleaseId -and -not $NonInteractive) { $ReleaseId = Read-Host 'Release ID printed by the deployment' }
+        if ($ReleaseId -notmatch '^opngate-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$') { throw 'Rollback requires a valid -ReleaseId from the deployment output.' }
+    }
+    $commands = @{'Deploy'='deploy';'Install'='all';'Update'='update';'Rollback'='rollback';'Check'='check';'Status'='status'}
+    $deploymentArguments = @($commands[$Action])
+    if ($Action -eq 'Rollback') { $deploymentArguments += $ReleaseId }
     try {
-        & $BashPath --noprofile --norc (ConvertTo-PosixPath (Join-Path $deploymentRoot 'deploy\deploy.sh')) $commands[$Action]
+        & $BashPath --noprofile --norc (ConvertTo-PosixPath (Join-Path $deploymentRoot 'deploy\deploy.sh')) @deploymentArguments
         if ($LASTEXITCODE -ne 0) { throw "Deployment stopped with exit code $LASTEXITCODE. Fix the reported step before retrying." }
     } finally { $env:DEPLOY_CONF = $previousConf }
 } catch {

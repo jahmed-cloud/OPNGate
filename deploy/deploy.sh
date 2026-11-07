@@ -2,9 +2,9 @@
 # One-command setup for the whole gateway, run from your admin PC (Linux, macOS or Git Bash).
 #
 #   cp deploy/deploy.conf.example deploy/deploy.conf    # edit it once
-#   sh deploy/deploy.sh all                              # everything, in order
+#   sh deploy/deploy.sh deploy                           # detects install or update
 #
-# Steps (each is safe to run again; secrets, agent.json and the portal database are never overwritten):
+# Install is for empty hosts; Update preserves live policy and agent customizations.
 #   check     SSH to every box, Docker on the Pis, required local tools
 #   pki       private CA + certificates (deploy/pki/out), only if missing
 #   secrets   deploy/services/.env and deploy/edge/.env with random keys, only the empty ones
@@ -14,6 +14,8 @@
 #   hostfw    host firewall on both Pis (only from ADMIN_IP, so you cannot lock yourself out)
 #   user      create the first portal user (you type the password)
 #   keys      copy registered passkeys to the firewall so it accepts signed actions
+#   deploy    detect a fresh/existing stack; run install or coordinated update
+#   rollback  RELEASE_ID: restore a retained application release (never the database)
 #   update    existing stack: portal, ingest and shipper only; preserves agent/routes/PKI
 #   status    quick health check of all three boxes
 #   all       check pki secrets services edge firewall [hostfw] user status
@@ -30,9 +32,9 @@ PORTAL_SUBDOMAIN=${PORTAL_SUBDOMAIN:-waf}
 PORTAL_HOST=$PORTAL_SUBDOMAIN.$DOMAIN
 SSH_KEY=${SSH_KEY:-$HOME/.ssh/id_ed25519}
 case "$SSH_KEY" in '~/'*) SSH_KEY=$HOME/${SSH_KEY#\~/} ;; esac
-ssh_cmd() { command ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 "$@"; }
+ssh_cmd() { command ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 "$@"; }
 case "$REMOTE_DIR" in /*) ;; *) echo 'REMOTE_DIR must be an absolute POSIX path'; exit 1 ;; esac
-case "$REMOTE_DIR" in *[!a-zA-Z0-9_./-]*|*..*) echo 'Unsafe REMOTE_DIR'; exit 1 ;; esac
+case "$REMOTE_DIR" in /|//|*[!a-zA-Z0-9_./-]*|*..*) echo 'Unsafe REMOTE_DIR'; exit 1 ;; esac
 for target in "$FIREWALL" "$EDGE" "$SERVICES"; do
   case "$target" in root@*[!a-zA-Z0-9@.:-]*|*[!a-zA-Z0-9@.:-]*|-*|'') echo 'Invalid SSH target'; exit 1 ;; esac
   case "$target" in root@*) ;; *) echo 'SSH targets must use root@host'; exit 1 ;; esac
@@ -86,7 +88,7 @@ compose() { # host dir args...
 
 step_check() {
   say "Checking tools and SSH"
-  for t in ssh tar openssl awk sed grep curl mktemp; do command -v "$t" >/dev/null || die "missing local tool: $t"; done
+  for t in ssh tar openssl awk sed grep curl mktemp date; do command -v "$t" >/dev/null || die "missing local tool: $t"; done
   ok "local tools"
   [ -f "$SSH_KEY" ] || die "SSH key not found: $SSH_KEY"
   for h in "$SERVICES" "$EDGE"; do
@@ -99,7 +101,9 @@ step_check() {
         die "Docker with compose missing on $h (install it, or set INSTALL_DOCKER=yes)"
       fi
     fi
-    ok "$h (SSH, Docker)"
+    ssh_cmd "$h" "python3 -c 'import sys; assert sys.version_info >= (3,9)'" >/dev/null 2>&1 \
+      || die "Python 3.9+ is required on $h for deployment recovery"
+    ok "$h (SSH, Docker, Python)"
   done
   ssh_cmd "$FIREWALL" "/bin/sh -c 'test -x /usr/local/sbin/configctl'" 2>/dev/null || die "cannot reach OPNsense at $FIREWALL"
   ok "$FIREWALL (OPNsense)"
@@ -275,28 +279,150 @@ step_keys() {
   ok "operator_keys.json updated; set actions.enabled=true in agent.json once to allow signed actions"
 }
 
-# Existing-install application update. Keep live Compose files, routes, PKI,
-# agent code/configuration, trust and host-firewall rules intact.
+# Detection is fail-closed: a failed SSH probe or partial install never selects Install.
+stack_state() { # host role
+  ssh_cmd "$1" /bin/sh -s -- "$REMOTE_DIR" "$2" <<'EOF'
+set -eu
+root=$1; role=$2
+if [ -f "$root/deploy/$role/.env" ] && [ -f "$root/deploy/$role/docker-compose.yml" ]; then
+  printf 'existing\n'
+elif [ -e "$root" ] && [ -n "$(ls -A "$root")" ]; then
+  printf 'partial\n'
+elif [ -n "$(docker ps -a -q --filter "label=com.docker.compose.project=gw-$role")" ]; then
+  printf 'partial\n'
+else
+  printf 'empty\n'
+fi
+EOF
+}
+
+detect_stack() {
+  [ "$SERVICES" != "$EDGE" ] || die "This deployment needs distinct services and edge hosts"
+  services_state=$(stack_state "$SERVICES" services) || die "could not inspect services host; no install selected"
+  edge_state=$(stack_state "$EDGE" edge) || die "could not inspect edge host; no install selected"
+  case "$services_state:$edge_state" in
+    existing:existing) stack=existing ;;
+    empty:empty) stack=empty ;;
+    *) die "partial/mixed deployment detected; inspect both hosts before retrying (no files changed)" ;;
+  esac
+}
+
+remote_stage() { # host role stage [sha256]
+  host=$1; role=$2; stage=$3
+  extra=; [ -z "${4:-}" ] || extra=" --sha256 $4"
+  ssh_cmd "$host" "python3 $REMOTE_DIR/releases/$release_id/controller.py $stage $REMOTE_DIR $release_id $role$extra"
+}
+
+rollback_hosts() {
+  recovery_scope=${1:-all}
+  rollback_failed=no
+  for pair in "$EDGE edge" "$SERVICES services"; do
+    set -- $pair
+    if [ "$recovery_scope" = staged ]; then
+      case "$2" in
+        services) [ "${update_services_created:-no}" = yes ] || continue ;;
+        edge) [ "${update_edge_created:-no}" = yes ] || continue ;;
+      esac
+    fi
+    if ! ssh_cmd "$1" "if [ -f $REMOTE_DIR/releases/$release_id/controller.py ]; then python3 $REMOTE_DIR/releases/$release_id/controller.py rollback $REMOTE_DIR $release_id $2; fi"; then
+      rollback_failed=yes
+      echo "   !!  recovery incomplete on $2; retained release: $release_id" >&2
+    fi
+  done
+  [ "$rollback_failed" = no ]
+}
+
+update_cleanup() {
+  result=$1
+  trap - 0 INT TERM HUP
+  if [ "$update_done" != yes ]; then
+    echo "   !!  update interrupted/failed; restoring previous application source/images" >&2
+    if ! rollback_hosts staged; then
+      echo "   !!  Reconnect and run: sh deploy/deploy.sh rollback $release_id" >&2
+    fi
+    [ "$result" -ne 0 ] || result=1
+  fi
+  [ -z "${update_archive:-}" ] || rm -f "$update_archive"
+  exit "$result"
+}
+
 step_update() {
-  step_check
-  say "Updating OPNGate application on the existing stack"
+  [ "${1:-}" = checked ] || step_check
+  detect_stack
+  [ "$stack" = existing ] || die "Update requires an existing stack; use deploy for a new installation"
+  say "Coordinated application update (private configuration retained)"
+  release_id=opngate-$(date -u +%Y%m%dT%H%M%SZ)-$(openssl rand -hex 4)
+  update_done=no
+  update_services_created=no; update_edge_created=no
+  update_archive=$(mktemp)
+  trap 'update_cleanup $?' 0
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
+  # No .env, PKI, database, Compose policy, Caddy routes or firewall agent in this archive.
+  if ! tar -C "$ROOT" -czf "$update_archive" --exclude=__pycache__ --exclude='*.pyc' \
+       portal/app portal/Dockerfile portal/requirements.txt docs README.md REVIEW.md \
+       Deploy.ps1 Deploy.cmd deploy/deploy.sh deploy/app-update.py 'OPNGate Security Assessment & Test Plan.md'; then
+    die "could not create the upload archive; nothing sent"
+  fi
+  checksum=$(openssl dgst -sha256 "$update_archive" | awk '{print $NF}')
+  echo "   Release $release_id"
+  echo "   Recovery: sh deploy/deploy.sh rollback $release_id"
+  # Stage and back up both hosts, then build both images before switching either host.
   for pair in "$SERVICES services" "$EDGE edge"; do
     set -- $pair; host=$1; role=$2
-    ssh_cmd "$host" "test -f $REMOTE_DIR/deploy/$role/.env && test -f $REMOTE_DIR/deploy/$role/docker-compose.yml" \
-      || die "$host has no existing stack; use Install for a new deployment"
+    ssh_cmd "$host" "umask 077; mkdir -p $REMOTE_DIR/releases; mkdir $REMOTE_DIR/releases/$release_id"
+    case "$role" in services) update_services_created=yes ;; edge) update_edge_created=yes ;; esac
+    ssh_cmd "$host" "umask 077; cat > $REMOTE_DIR/releases/$release_id/source.tgz" < "$update_archive"
+    ssh_cmd "$host" "umask 077; cat > $REMOTE_DIR/releases/$release_id/controller.py" < "$ROOT/deploy/app-update.py"
+    remote_stage "$host" "$role" prepare "$checksum"
   done
-  # Do not install the firewall agent here: local telemetry/control extensions
-  # are operator-owned and need a separately reviewed firewall upgrade.
+  remote_stage "$SERVICES" services build
+  remote_stage "$EDGE" edge build
+  remote_stage "$SERVICES" services activate
+  remote_stage "$EDGE" edge activate
+  remote_stage "$EDGE" edge verify
+  remote_stage "$SERVICES" services verify
+  # Public requests use certificate validation, no credentials, and no state-changing probes.
+  for spec in '/login:200' '/healthz:200' '/api/live:401' '/api/live/stream:401'; do
+    path=${spec%:*}; expected=${spec##*:}
+    code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Accept: application/json' --max-time 15 "https://$PORTAL_HOST$path") || code=000
+    [ "$code" = "$expected" ] || die "$path returned $code; expected $expected"
+  done
+  remote_stage "$SERVICES" services finish
+  remote_stage "$EDGE" edge finish
+  update_done=yes
+  rm -f "$update_archive"; update_archive=
+  trap - 0 INT TERM HUP
+  ok "deployed and verified $release_id; backups retained on both hosts"
+}
+
+step_rollback() {
+  release_id=${1:-}
+  printf '%s\n' "$release_id" | grep -Eq '^opngate-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$' || die 'Pass the release ID printed by Update'
+  step_check
+  found_release=no
   for host in "$SERVICES" "$EDGE"; do
-    ssh_cmd "$host" "mkdir -p $REMOTE_DIR/releases; tar -czf $REMOTE_DIR/releases/opngate-app-\$(date +%Y%m%d%H%M%S).tgz -C $REMOTE_DIR portal"
-    push "$host" portal
+    if ssh_cmd "$host" "test -f $REMOTE_DIR/releases/$release_id/controller.py"; then found_release=yes; fi
   done
-  compose "$SERVICES" services build portal portal-ingest
-  compose "$SERVICES" services up -d --no-deps portal-ingest
-  compose "$SERVICES" services up -d --no-deps portal
-  compose "$EDGE" edge build waf-shipper
-  compose "$EDGE" edge up -d --no-deps waf-shipper
+  [ "$found_release" = yes ] || die 'No retained controller found for this release ID'
+  say "Restoring application source/images for $release_id (database stays current)"
+  rollback_hosts || die 'Recovery incomplete; inspect the retained release state on both hosts'
   step_status
+}
+
+step_install() {
+  [ "${1:-}" = checked ] || step_check
+  detect_stack
+  [ "$stack" = empty ] || die 'Install refuses an existing stack; use Update'
+  step_pki; step_secrets; step_services; step_edge; step_firewall; step_hostfw; step_user; step_status
+  say "Done. Sign in at https://$PORTAL_HOST, add a passkey under Account security, then run: sh deploy/deploy.sh keys"
+}
+
+step_deploy() {
+  step_check
+  detect_stack
+  if [ "$stack" = existing ]; then step_update checked; else step_install checked; fi
 }
 
 step_status() {
@@ -321,9 +447,9 @@ step_status() {
 
 cmd=${1:-help}; [ $# -gt 0 ] && shift
 case $cmd in
-  check|pki|secrets|services|edge|firewall|hostfw|keys|status|update) step_$cmd ;;
+  check|pki|secrets|services|edge|firewall|hostfw|keys|status|update|deploy) step_$cmd ;;
+  rollback) step_rollback "${1:-}" ;;
   user) step_user "${1:-}" ;;
-  all) step_check; step_pki; step_secrets; step_services; step_edge; step_firewall; step_hostfw; step_user; step_status
-       say "Done. Next: sign in at https://$PORTAL_HOST, add a passkey under Account security, then run: sh deploy/deploy.sh keys" ;;
+  all) step_install ;;
   *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

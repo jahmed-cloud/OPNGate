@@ -4,7 +4,7 @@ Deploy read-only first and pass each gate before proceeding. Back up existing co
 
 ## Guided deployment
 
-On Windows, double-click `Deploy.cmd`, or run `.\Deploy.ps1`. See [INSTALL.md](INSTALL.md) for the launcher, prerequisites and update behavior. Use Install for a new stack and Update for routine application changes. A hostname move follows [HOSTNAME_MIGRATION.md](HOSTNAME_MIGRATION.md).
+On Windows, double-click `Deploy.cmd`, or run `.\Deploy.ps1`. One entrypoint detects a fresh or existing deployment; incomplete hosts stop. See [INSTALL.md](INSTALL.md) for prerequisites, coordinated builds, verification and rollback. Explicit Install is for empty hosts; Update preserves existing policy and agent extensions. A hostname move follows [HOSTNAME_MIGRATION.md](HOSTNAME_MIGRATION.md).
 
 ## Shell deployment
 
@@ -13,12 +13,14 @@ On Windows, double-click `Deploy.cmd`, or run `.\Deploy.ps1`. See [INSTALL.md](I
 
 ```sh
 sh deploy/deploy.sh check      # SSH and Docker on every box
-sh deploy/deploy.sh all        # NEW installation: pki secrets services edge firewall hostfw user status
-sh deploy/deploy.sh update     # EXISTING compatible stack: application only
+sh deploy/deploy.sh deploy     # detect a fresh stack or update an existing compatible stack
+sh deploy/deploy.sh all        # explicit NEW installation; refuses an existing stack
+sh deploy/deploy.sh update     # EXISTING compatible stack: backup/build/verify; application only
+sh deploy/deploy.sh rollback <release-id>  # restore application source/images, retain current database
 sh deploy/deploy.sh keys       # after registering a passkey: trust it on the firewall
 ```
 
-Steps can be rerun on their own. `secrets` fetches the `.env` files from boxes that already have them, and the
+An interrupted update retains its release ID and recovery controller; use the Rollback procedure in INSTALL.md before retrying. Other setup steps can be run individually after reviewing their scope. `secrets` fetches the `.env` files from boxes that already have them, and the
 `services`, `edge` and `firewall` steps stop if a box's certificate differs from `deploy/pki/out` (set FORCE_PKI=yes
 only when rotating the CA). `hostfw` refuses to run unless the Pi sees your SSH session coming from ADMIN_IP.
 The gates below still apply: check each one before moving on.

@@ -12,7 +12,7 @@ The screenshots show an earlier release under the previous name, with invented d
 
 ## Start deployment
 
-On Windows, clone or download this repository, then **double-click `Deploy.cmd`**. The guided launcher offers Configure, Check, Install, Update and Status. First launch collects the deployment settings and saves them in an ignored private file.
+On Windows, clone or download this repository, then **double-click `Deploy.cmd`** or run `Deploy.ps1`. One command checks the hosts and detects whether to install a new stack or update an existing one. First launch collects settings into an ignored private file. Use `-Action Menu` for individual operations.
 
 ```powershell
 git clone https://github.com/jahmed-cloud/OPNGate.git
@@ -20,18 +20,25 @@ cd OPNGate
 .\Deploy.ps1
 ```
 
-Prepare root SSH key access and verified host fingerprints, Docker Compose on the two Linux hosts, a proxied DNS record, and the required firewall port forwards. The default console hostname for a new setup is `opngate.<your-domain>`.
+Prepare root SSH key access and verified host fingerprints, Docker Compose and Python 3.9+ on the two Linux hosts, a proxied DNS record, and the required firewall port forwards. The default console hostname for a new setup is `opngate.<your-domain>`.
 
 On Linux, macOS or Git Bash:
 
 ```sh
 cp deploy/deploy.conf.example deploy/deploy.conf
 # Edit domain, host addresses, SSH key, interfaces and admin access.
-sh deploy/deploy.sh check
-sh deploy/deploy.sh all
+sh deploy/deploy.sh deploy
 ```
 
-For an existing installation, use **Update** in the launcher or `sh deploy/deploy.sh update`. It updates the portal, ingest service and matching WAF shipper while retaining live routes, host firewall policy, certificates, agent configuration and operator trust. A hostname migration is a separate operation.
+The same command updates an existing compatible installation. It verifies the source archive, retains source/image/database backups, builds portal, ingest and the matching WAF shipper before switching either Pi, then checks running image IDs, current telemetry, shipper contact and public authentication guards. Failed updates attempt to restore the previous source/images on both hosts; database activity stays current. Live routes, certificates, credentials, agent extensions and firewall policy are retained.
+
+Recovery uses the release ID printed by deployment:
+
+```powershell
+.\Deploy.ps1 -Action Rollback -ReleaseId <release-id>
+```
+
+Partial installs stop for inspection. Fresh installation still requires the prerequisites above; hostname, Compose/protocol and firewall-agent migrations need their own release procedure. See the [deployment guide](docs/INSTALL.md) for failure recovery and verification limits.
 
 Read [installation](docs/INSTALL.md), [the runbook](docs/RUNBOOK.md) and [hostname migration](docs/HOSTNAME_MIGRATION.md) before deploying. Real settings, certificates, databases and private keys stay out of Git.
 
@@ -61,7 +68,7 @@ Rates cover traffic observed by the firewall. Traffic switched entirely within a
 | Firewall agent | `agent/` | Telemetry over mTLS and verified action execution |
 | Services stack | `deploy/services/` | Portal HTTPS 9443, ingest mTLS 9444, CrowdSec LAPI 9080 |
 | Edge stack | `deploy/edge/` | Caddy on 80/443, Coraza/OWASP CRS, CrowdSec and WAF reporting |
-| Deployment launcher | `Deploy.cmd`, `Deploy.ps1`, `deploy/deploy.sh` | Guided configuration and scoped deployment |
+| Deployment launcher | `Deploy.cmd`, `Deploy.ps1`, `deploy/deploy.sh` | One-command detection, scoped deployment, verification and rollback |
 
 The rebuild separates application workspaces while retaining the established authentication, telemetry and action protocols. Existing databases and route URLs remain supported. See [architecture and feature parity](docs/ARCHITECTURE.md).
 

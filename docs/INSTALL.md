@@ -1,58 +1,84 @@
-# OPNGate installation
+# OPNGate installation and updates
 
-## Before launching
+## One command
 
-Use an OPNsense firewall, a services Linux host and an edge Linux host. Current Compose files target the existing two-Pi architecture. Install Docker with its Compose plugin on both Linux hosts. Prepare root SSH key login and verify host fingerprints from a trusted source before the launcher uses strict host-key checking.
-
-Create a proxied DNS record for `opngate.<domain>`, configure Cloudflare Full (strict), and forward WAN IPv4 TCP 80/443 to the edge. Keep services 9443/9444/9080 private. Identify the admin workstation address seen by SSH, the Linux LAN interface and OPNsense logical interfaces. Keep console access available when applying host-firewall rules.
-
-## Windows: one launcher
-
-Clone or download [OPNGate](https://github.com/jahmed-cloud/OPNGate), install Git for Windows, and double-click `Deploy.cmd`. Its PowerShell launcher uses Git Bash to run the same deployment implementation as Linux/macOS.
-
-1. **Configure** collects settings into `deploy/deploy.conf`; no remote changes.
-2. **Check** verifies tools, key access, both Docker installations and OPNsense access.
-3. **Install** provisions a new stack in order, with interactive first-user setup.
-4. **Update** rebuilds portal, ingest and the matching shipper on an existing stack.
-5. **Status** checks public login, running core services and the agent; failures return a nonzero exit code.
-
-The PowerShell process launched by `Deploy.cmd` uses a process-scoped execution policy; it does not change the workstation's persistent policy.
+Keep the existing OPNsense plus services/edge Linux architecture. From a checkout on Windows, double-click `Deploy.cmd` or run:
 
 ```powershell
-.\Deploy.ps1 -Action Configure
-.\Deploy.ps1 -Action Check
-.\Deploy.ps1 -Action Install
-.\Deploy.ps1 -Action Update
-.\Deploy.ps1 -Action Status -NonInteractive -NoPause
+.\Deploy.ps1
 ```
 
-Use `-ConfigPath` for a separate private configuration and `-BashPath` for a nonstandard Git for Windows installation. Non-interactive mode requires an existing configuration. Existing configuration files are retained; edit that file to change saved settings.
-
-## Linux/macOS or Git Bash
+On Linux, macOS or Git Bash, copy/edit the private configuration once, then use the same deployment entrypoint for installation and updates:
 
 ```sh
 cp deploy/deploy.conf.example deploy/deploy.conf
-# Edit the private file.
-sh deploy/deploy.sh check
-sh deploy/deploy.sh all
-# Later application updates:
-sh deploy/deploy.sh update
+# Edit domain, hosts, SSH key, interface names and admin access.
+sh deploy/deploy.sh deploy
 ```
 
-`deploy.conf` is trusted shell configuration: do not source a configuration received from an untrusted party. The repository supplies examples only. The wizard writes quoted values and LF line endings, including SSH key paths with spaces.
+The launcher checks prerequisites, then probes both hosts. Two existing compatible stacks select an application update; two empty hosts select installation. Mixed/partial installations and failed probes stop. Explicit Install also refuses an existing stack. The installer does not fetch or execute an unpinned remote bootstrap script: run the checked-out version you reviewed.
 
-## New installation behavior
+## Prerequisites
 
-The install path creates missing secrets and a complete private PKI. An incomplete local certificate set stops deployment rather than replacing part of it. Existing remote certificates must match before deployment. Services start before the edge. The firewall agent starts with actions disabled; configure its actual physical interfaces and segments before relying on telemetry, and manually export registered operator keys before enabling signed controls.
+Use an OPNsense firewall and two distinct Linux hosts. Install Docker with Compose and Python 3.9+ on both Linux hosts; application Python runs in the supplied containers. Prepare root SSH key login and verify each host fingerprint from a trusted source. Windows also needs Git for Windows; the PowerShell launcher uses its Bash/OpenSSL/SSH tools. macOS/Linux needs the local tools listed by Check.
 
-`INSTALL_HOSTFW=yes` applies the supplied Linux host-firewall policy only after confirming the remote SSH source matches `ADMIN_IP`. List application upstreams explicitly. The launcher does not configure your upstream applications or import arbitrary existing proxy sites.
+Create proxied DNS for `opngate.<domain>`, configure Cloudflare Full (strict), and forward WAN IPv4 TCP 80/443 to the edge. Keep services 9443/9444/9080 private. Identify the admin address seen by SSH, Linux LAN interfaces and OPNsense logical interfaces. Keep console access available when initially applying host-firewall rules.
 
-## Existing installations
+First Windows launch collects settings into ignored `deploy/deploy.conf`, then deploys. Use `-Action Configure` to collect settings without remote changes. Existing configuration is retained; edit it to change saved values. Configuration is trusted shell code: use your own private file. SSH key paths with spaces are supported. `Deploy.cmd` forwards command-line options and uses a process-scoped PowerShell execution policy.
 
-Use Update for routine application releases. It backs up existing portal source on both Pis and updates application code without replacing live Compose files, Caddy routes, certificates, credentials, volumes, agent code/configuration, operator trust or host firewall policy. This path requires an already compatible stack; releases that change Compose or agent protocols need the release-specific runbook first. An interrupted update must be checked before retrying.
+## Individual operations
 
-A hostname move changes WebAuthn identity and signed-action configuration. Follow [HOSTNAME_MIGRATION.md](HOSTNAME_MIGRATION.md) separately. WAF enforcement stays as configured; the generic fresh-install example starts in DetectionOnly.
+```powershell
+.\Deploy.ps1 -Action Menu
+.\Deploy.ps1 -Action Configure
+.\Deploy.ps1 -Action Check -NonInteractive -NoPause
+.\Deploy.ps1 -Action Deploy -NonInteractive -NoPause
+.\Deploy.ps1 -Action Update -NonInteractive -NoPause
+.\Deploy.ps1 -Action Status -NonInteractive -NoPause
+.\Deploy.ps1 -Action Rollback -ReleaseId <release-id>
+```
 
-## Verification and recovery
+`-ConfigPath` selects a private configuration; `-BashPath` selects a nonstandard Git Bash installation. Non-interactive mode requires an existing configuration. Shell equivalents are `check`, `deploy`, `update`, `status`, `rollback <release-id>` and `all` for an explicit fresh install.
 
-Sign in, check Networks/Devices/Traffic, verify one-second freshness and independent historical charts, and confirm ordinary application authentication still works. Inspect action results on the firewall before repeating failed requests. Keep configuration/PKI/database backups and the prior images until a normal use cycle passes. The installer tests simulate hosts and failure paths; a new hardware installation still needs these deployment checks.
+## Existing-stack update
+
+1. Inspect both compatible stacks and create a unique release directory on each host. Verify the uploaded archive SHA-256 before installing it. Host locks prevent two releases from modifying the same deployment; operation locks prevent recovery racing a still-running stage.
+2. Retain the previous selected source files and exact running image IDs/tags on both hosts. Take a private SQLite backup through the running portal. The backup is mode 0600 and stays in the services data volume.
+3. Copy only public application, documentation and deployment files. Never ship `.env`, PKI, databases, live Compose files, Caddy routes, agent source/configuration, operator trust or host-firewall policy as part of Update. Unexpected/private archive paths and links are rejected.
+4. Build portal/ingest on services and the matching shipper on edge before activating either host. Import each built image with a read-only filesystem and no network; compare its application files against the staged source hashes.
+5. Recreate only portal, ingest and shipper as needed. Check running image IDs and restart counts, fresh current telemetry, ingest listener availability and recent shipper contact. Retry readiness up to 30 times with two seconds between attempts. Public GET checks require login/health 200 and unauthenticated live JSON/SSE 401, with normal TLS certificate validation.
+6. Mark the release complete and release host locks. Retain source archives, state, private logs and image tags for recovery; no automatic pruning runs.
+
+This is a coordinated update with recovery, not an atomic distributed transaction or a zero-downtime promise. A short reconnect can occur during recreation. It requires an already compatible Compose/agent protocol and healthy telemetry sources. A release with schema/protocol/identity changes needs a specific migration procedure.
+
+## Failure recovery
+
+A failed build leaves the previous containers running. A failure during activation/readiness attempts to restore source and image tags on both reachable hosts, recreating only the application services that may have switched. It never restores a stale database over new events or user changes.
+
+An update prints a release ID such as `opngate-20261108T010203Z-1234abcd`. After an SSH/workstation interruption, reconnect and use that exact ID:
+
+```powershell
+.\Deploy.ps1 -Action Rollback -ReleaseId opngate-20261108T010203Z-1234abcd
+# After recovery, retry the normal deployment with a new release ID:
+.\Deploy.ps1
+```
+
+```sh
+sh deploy/deploy.sh rollback opngate-20261108T010203Z-1234abcd
+```
+
+Recovery refuses another deployment's host lock and refuses an old completed release over a newer one. If a remote stage is still running, wait for it to finish before retrying recovery. If a host cannot be reached, automatic recovery may be incomplete: the command reports it and retains the state. Inspect private `releases/<release-id>/state.json`, `build.log`, `import.log` and the lock owner on both hosts; do not blindly delete locks or prune backup images. A kill between lock-directory creation and owner recording can need manual inspection.
+
+The release controller retained on each host performs recovery, so rollback remains available after the live installer source is restored. Keep the admin checkout containing the new Rollback command until a normal-use cycle passes. Database snapshots are manual recovery material; schema downgrades and full host failures are outside automatic rollback.
+
+## New installation
+
+The installation branch creates missing secrets and a complete private PKI. Partial certificate sets stop rather than being regenerated. Matching remote certificates are required. Services start before edge; firewall setup and first-user creation run interactively. The fresh agent starts with actions disabled: configure actual physical interfaces/segments, register a passkey, and explicitly export/trust its public key before enabling signed controls.
+
+`INSTALL_HOSTFW=yes` applies Linux host-firewall policy after checking the remote SSH source matches `ADMIN_IP`. List permitted application upstreams explicitly. The launcher does not configure unrelated applications, migrate arbitrary proxy routes or upgrade operator-owned firewall-agent extensions. New WAF examples start in DetectionOnly; existing updates preserve the live mode.
+
+## Verification boundaries
+
+Check a physical-key login, Networks/Devices/Traffic freshness, historical charts and a normal signed control after deployment. Inspect actual firewall state before retrying a failed action. HTTP availability and software-authenticator tests do not prove real hardware approval or application upload/sync compatibility.
+
+Automated tests exercise real archive/state/restore logic in disposable directories and orchestrate simulated hosts for failure ordering. A successful production update validates the existing-stack path, not a clean hardware installation or every possible recovery fault. Keep source, PKI/configuration/database backups and prior images until normal use passes. See [STATUS.md](STATUS.md) for the latest measured deployment evidence.

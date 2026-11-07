@@ -20,6 +20,7 @@ def setup(tmp_path):
     if not BASH.exists(): pytest.skip('POSIX shell unavailable')
     root=tmp_path/'checkout'; (root/'deploy').mkdir(parents=True)
     shutil.copyfile(ROOT/'deploy/deploy.sh',root/'deploy/deploy.sh')
+    shutil.copyfile(ROOT/'deploy/app-update.py',root/'deploy/app-update.py')
     (root/'portal').mkdir(); (root/'portal/example.txt').write_text('source only')
     key=tmp_path/'key with spaces';key.write_text('fake test key')
     conf=root/'deploy/deploy.conf'
@@ -31,18 +32,30 @@ printf 'CALL ' >> "$SSH_LOG"
 printf '[%s]' "$@" >> "$SSH_LOG"
 printf '\\n' >> "$SSH_LOG"
 case "$*" in *"$FAIL_SSH_TARGET"*) [ -z "$FAIL_SSH_TARGET" ] || exit 7 ;; esac
+case "$*" in *"controller.py ${FAIL_STAGE:-never} "*)
+  case "$*" in *"${FAIL_ON_HOST:-never}"*) exit 8 ;; esac ;;
+esac
+case "$*" in *'/bin/sh -s -- /opt/gateway '*)
+  case "$*" in *root@edge.example*) echo "${EDGE_STACK_STATE:-existing}" ;; *) echo "${SERVICES_STACK_STATE:-existing}" ;; esac ;;
+esac
 case "$*" in *'docker compose ps --status running -q'*) echo 3 ;; *'docker compose ps'*) echo 'portal: running' ;; esac
 exit 0
 ''',
       'tar':'''#!/bin/sh
 [ "${FAIL_ARCHIVE:-}" != yes ] || exit 9
 while [ "$#" -gt 0 ]; do
- if [ "$1" = -cf ]; then shift; : > "$1"; break; fi
+ if [ "$1" = -cf ] || [ "$1" = -czf ]; then shift; : > "$1"; break; fi
  shift
 done
 exit 0
 ''',
-      'curl':'#!/bin/sh\nprintf 200\n',
+      'curl':'''#!/bin/sh
+case "$*" in
+ *'/healthz'*) [ "${FAIL_PUBLIC:-no}" != yes ] || { printf 503; exit 0; }; printf 200 ;;
+ *'/api/live'*) printf 401 ;;
+ *) printf 200 ;;
+esac
+''',
     }
     for name,body in scripts.items():
         p=bins/name;p.write_text(body,encoding='utf-8',newline='\n');p.chmod(0o755)
@@ -62,8 +75,9 @@ def test_update_preserves_routes_trust_and_firewall(setup):
     assert result.returncode==0,result.stdout+result.stderr
     assert '['+shell_path(key)+']' in log
     assert '[StrictHostKeyChecking=yes]' in log
-    assert 'services && docker compose build portal portal-ingest' in log
-    assert 'edge && docker compose build waf-shipper' in log
+    assert log.count('controller.py build ')==2
+    assert log.rfind('controller.py build ') < log.find('controller.py activate ')
+    assert log.count('controller.py verify ')==2 and log.count('controller.py finish ')==2
     for forbidden in ('portal_rules.php','fw_agent restart','gen-key','operator_keys.json','get.docker.com','deploy/pki/out','--remove-orphans'):
         assert forbidden not in log
 
@@ -81,6 +95,55 @@ def test_archive_failure_is_not_reported_as_success(setup):
     assert result.returncode!=0
     assert 'nothing sent' in result.stderr
     assert 'tar -xf' not in log and 'docker compose build' not in log
+
+
+def test_default_deploy_uses_existing_update_path(setup):
+    _,_,run=setup
+    result,log=run('deploy')
+    assert result.returncode==0,result.stdout+result.stderr
+    assert log.count('controller.py activate ')==2
+    assert 'gen-key' not in log and 'portal_rules.php' not in log
+
+
+@pytest.mark.parametrize('states',[('existing','empty'),('partial','existing')])
+def test_mixed_or_partial_hosts_never_select_install(setup,states):
+    _,_,run=setup
+    result,log=run('deploy',SERVICES_STACK_STATE=states[0],EDGE_STACK_STATE=states[1])
+    assert result.returncode!=0 and 'partial/mixed' in result.stderr
+    assert 'controller.py' not in log and 'gen-key' not in log
+
+
+def test_install_refuses_existing_stack(setup):
+    _,_,run=setup
+    result,log=run('all')
+    assert result.returncode!=0 and 'Install refuses' in result.stderr
+    assert 'portal_rules.php' not in log and 'gen-key' not in log
+
+
+def test_second_host_build_failure_rolls_back_before_any_activation(setup):
+    _,_,run=setup
+    result,log=run('update',FAIL_STAGE='build',FAIL_ON_HOST='root@edge.example')
+    assert result.returncode!=0
+    assert 'controller.py activate ' not in log
+    assert log.count('controller.py rollback ')==2
+
+
+def test_public_readiness_failure_triggers_both_host_rollbacks(setup):
+    _,_,run=setup
+    result,log=run('update',FAIL_PUBLIC='yes')
+    assert result.returncode!=0 and '/healthz returned 503' in result.stderr
+    assert log.count('controller.py activate ')==2
+    assert log.count('controller.py rollback ')==2
+    assert 'controller.py finish ' not in log
+
+
+def test_windows_rollback_requires_recorded_release_id(tmp_path):
+    if os.name!='nt': pytest.skip('Windows launcher')
+    config=tmp_path/'private.conf';config.write_text('# test only')
+    result=subprocess.run(['powershell.exe','-NoProfile','-ExecutionPolicy','Bypass','-File',str(ROOT/'Deploy.ps1'),
+        '-Action','Rollback','-NonInteractive','-NoPause','-ConfigPath',str(config),'-ReleaseId','../bad'],
+        text=True,capture_output=True,timeout=20)
+    assert result.returncode!=0 and 'valid -ReleaseId' in result.stderr
 
 
 def test_partial_pki_is_not_regenerated(setup):

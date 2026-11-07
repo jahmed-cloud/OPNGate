@@ -1,5 +1,6 @@
 # Settings for deploy/deploy.sh. Copy to deploy/deploy.conf (git-ignored) and edit.
-# Everything runs from your admin PC over SSH; the boxes need SSH key login for root.
+# Run: sh deploy/deploy.sh deploy (or Deploy.ps1 on Windows).
+# Everything runs from your admin PC over SSH; the Linux hosts need Docker Compose, Python 3.9+ and root SSH key login.
 
 DOMAIN=example.com              # parent DNS domain
 PORTAL_SUBDOMAIN=opngate        # console at https://opngate.example.com
