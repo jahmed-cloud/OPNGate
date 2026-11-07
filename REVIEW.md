@@ -48,3 +48,7 @@ Map rates/activity and Traffic bandwidth bars now follow the two-second feed. Th
 ## November 8 security follow-up
 
 The revised [security assessment](docs/SECURITY_ASSESSMENT.md) records the 2.0.1 authentication hardening, local regression coverage and pending external checks. It supersedes the November 6 pentest draft’s backend, CSP and origin-bypass assumptions. Earlier test counts and runtime observations above describe their respective releases.
+
+## November 8 deployment follow-up
+
+The Windows launcher now defaults to one-command Deploy, with the same `deploy` entrypoint on POSIX systems. Existing updates stage and back up both hosts, build and verify all application images before activation, check exact running image IDs plus telemetry/public auth, and retain scoped rollback without restoring stale database contents. Incomplete/failed host detection cannot fall through to fresh installation. The final Windows command completed on production; private configuration fingerprints remained unchanged. Validation: 178 Python tests, including 31 deployment tests, plus existing browser harnesses and launcher syntax checks. See [INSTALL.md](docs/INSTALL.md) for recovery limits and [STATUS.md](docs/STATUS.md) for measured evidence. Fresh hardware installation remains a separate verification item.
