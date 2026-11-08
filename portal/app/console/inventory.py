@@ -17,8 +17,11 @@ def snapshot() -> dict:
         wan = name.upper() == "WAN"
         rate = rates.get((interface.get("name"), interface.get("segment")))
         stamp = current["reported_at"] if rate else metadata_at
-        max_age = (120 if current.get("source") == "telemetry" else 5) if rate else 120
-        stale = bool(rate and current["stale"]) or not stamp or not 0 <= now - stamp < max_age
+        # The live snapshot already checks fractional received_at against time.time().
+        # Comparing it again with integer db.now() marks same-second reports as future/stale.
+        stale = bool(rate and current["stale"]) or not stamp
+        if not (rate and current.get("source") == "live"):
+            stale = stale or not 0 <= now - stamp < 120
         value = rate if rate else interface
         rx, tx = (None, None) if stale else (value.get("rx_bps"), value.get("tx_bps"))
         count = counts.get(interface.get("segment"), {})

@@ -21,7 +21,6 @@
   <a class="tile tile-link {{ 'bad' if open_alerts else '' }}" href="/alerts"><span class="label">Open alerts</span><span class="value">{{ "{:,}".format(open_alerts) }}</span><span class="sub">Review events →</span></a>
   <div class="tile"><span class="label">Firewall uptime</span><span class="value compact">{{ gw.uptime_s | duration if gw.uptime_s else '—' }}</span><span class="sub">Last report {{ last_seen | ago }}</span></div>
 </div>
-<p class="small muted" data-live-status>Connecting to one-second live rates · history refresh every 60 s.</p>
 <section class="card availability-card" data-refresh-section="overview-4">
   <div class="card-head"><div><h2>Observed availability</h2><p class="muted small">{{ range_key }} window · missing telemetry is shown separately</p></div><div class="availability-number">{{ '%.2f' % availability if availability is not none else '—' }} <small>%</small></div></div>
   {{ uptime_bar(segments, metrics.start, metrics.end) }}
@@ -47,9 +46,9 @@
     </tbody></table>{% else %}<div class="empty-state"><strong>No recorded outages</strong><p>Missing telemetry does not confirm an outage or uninterrupted service.</p></div>{% endif %}
   </section>
   <section class="card" data-refresh-section="overview-11"><div class="card-head"><h2>Security workspace</h2><a class="small" href="/threats">Open threats →</a></div>
-    <p class="muted">This portal monitors your gateway. Web request inspection runs at the edge through Caddy, Coraza, and OWASP CRS.</p>
-    <div class="capability-row"><span>Web application firewall</span><span class="status">Verify at edge</span></div>
-    <p class="small muted">WAF mode is not verified by this dashboard. Confirm the edge configuration and run a protection check before relying on blocking.</p>
+    <p class="muted">Review web attacks, intrusion alerts and active bans.</p>
+    <div class="capability-row"><span>Web application firewall</span><span class="status">Managed at edge</span></div>
+    <p class="small muted">Threats shows the latest reported mode and block evidence.</p>
     <div class="quick-links"><a href="/alerts">Investigate alerts</a><a href="/traffic?range={{ range_key }}">Inspect traffic</a>{% if session.is_operator %}<a href="/actions">Signed actions</a>{% endif %}</div>
   </section>
 </div>

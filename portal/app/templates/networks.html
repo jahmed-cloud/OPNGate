@@ -7,7 +7,7 @@
     <p class="page-description">Your interfaces, connected devices and current traffic, together.</p></div>
   <a class="button-link" href="/traffic">Traffic history</a>
 </div>
-<p class="small muted">To block websites for a subnet: <strong>Block sites → choose categories/domains → approve with security key</strong>. <a href="/help#websites">Website-blocking guide</a></p>
+<p class="context-help"><strong>Website controls</strong><span>Block sites → choose categories or domains → approve with your security key.</span><a href="/help#websites">Website-blocking guide</a></p>
 {% if not console.agent_online %}<p class="banner warn">Waiting for fresh gateway telemetry. Last report {{ console.agent_last_seen | ts }}.</p>{% endif %}
 <p class="small muted" data-live-status>Connecting to one-second live rates…</p>
 <div class="network-grid">
@@ -21,7 +21,7 @@
     <div><span class="label">Upload</span><strong class="up" data-live-interface="{{ net.interface }}" data-live-rate="{{ 'tx_bps' if net.wan else 'rx_bps' }}">{{ net.up_bps | bps }}</strong></div>
   </div>
   {% if not net.wan %}
-  <p><a href="/clients?segment={{ net.name | urlencode }}">{{ net.online_clients }} devices online</a><span class="muted small"> · {{ net.total_clients }} known</span></p>
+  <p><a href="/clients?segment={{ net.name | urlencode }}">{{ net.online_clients }} device{{ '' if net.online_clients == 1 else 's' }} online</a><span class="muted small"> · {{ net.total_clients }} known</span></p>
   <div class="network-meta">{% if net.blocks or net.name in net_blocks %}{{ dev.sites_badge(net.blocks, compact=True) }}{% else %}<span class="muted small">No extra site blocks</span>{% endif %}
     {% if session.is_operator %}{{ dev.net_menu({'segment': net.name, 'name': net.interface, 'blocks': net.blocks}) }}{% endif %}</div>
   {% else %}<div class="network-meta"><span class="muted small">Download enters the WAN; upload leaves it.</span></div>{% endif %}

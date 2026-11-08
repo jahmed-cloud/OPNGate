@@ -2,6 +2,7 @@
 "use strict";
 document.addEventListener("DOMContentLoaded", () => {
   bindMenus();
+  bindNavigation();
   placeFlowControls();
   bindThemeToggle();
   syncTimeZone();

@@ -19,6 +19,16 @@ WAF enforcement is enabled in the private edge environment (`WAF_MODE=On`). A na
 
 The existing community topic was rewritten as “OPNGate: a self-hosted OPNsense gateway console” and includes two earlier-release reference screenshots with sample data and an explicit historical caption. No private telemetry or configuration was published. See COMMUNITY_POST.md.
 
+## UI cleanup and freshness fix (2.0.2)
+
+The existing sidebar/orange layout is retained. The cleanup shortens repeated status/help text, aligns controls, fixes network rate colors, bounds long device names/rate columns, groups device controls, and improves the sign-in presentation. Mobile Refresh stays available; Sign out is reachable in the navigation drawer. Keyboard navigation includes a real open/close button, inert background/hidden drawer, Tab containment and Escape focus return. Hidden fixed menu panels and uncontained screen-reader labels no longer make the whole device page scroll sideways; the table scrolls inside its card. Expanded menu sections reposition within the viewport.
+
+Live DOM updates are coalesced per animation frame; mounted-node lookups are cached and invalidated after page/map fragment changes. All observed chart points are retained within the existing 180-point bound. Manual refresh has a busy state and updates charts while automatic refresh remains paused. Hidden nested menu groups do not block later refreshes. Collection/SSE/history intervals are unchanged.
+
+The Networks view now uses the live snapshot’s fractional-time freshness decision. Its previous second comparison used integer time, which could mark a newly received same-second sample as stale. Two regression cases cover fresh and genuinely stale reports.
+
+Validation: 180 Python tests pass; JavaScript syntax and DOM/stream harnesses pass, including frame batching, node-cache invalidation, paused manual refresh and visible/hidden menu guards. Sample-data browser checks cover desktop light/dark themes, 390/320-pixel layouts, contained table scrolling, menu bounds and keyboard dismissal. CSS is 39; bootstrap JavaScript 26; live/UI workspace scripts 2; other workspace scripts 1. Production deployment and final browser confirmation are pending. No sustained frame-rate or production-load benchmark is claimed.
+
 ## Single-command deployment follow-up
 
 `Deploy.ps1`/`Deploy.cmd` now default to Deploy; the shell equivalent is `sh deploy/deploy.sh deploy`. Both detect a fresh or compatible existing stack and stop on failed/mixed/partial probes. Existing updates use source checksums, exclusive host/operation locks, source/image/SQLite backups, both-host builds before cutover, read-only image/source validation, running-image checks, telemetry/shipper readiness and public GET auth checks. Failure recovery restores application source/images without replacing the current database. Rollback accepts the retained release ID and protects newer deployments. See [INSTALL.md](INSTALL.md).

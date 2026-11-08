@@ -74,7 +74,6 @@
 {%- endmacro %}
 
 {% macro label_form(c) -%}
-<p class="menu-label">Name and icon</p>
 <form method="post" action="/clients/label" class="label-form"><input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="mac" value="{{ c.mac }}"><input type="hidden" name="next" value="{{ '/clients' if request.url.path == '/clients' else '/' }}">
   <label>Name<input name="name" maxlength="40" value="{{ c.alias or '' }}" placeholder="{{ c.hostname or c.vendor or c.mac }}"></label>
@@ -97,7 +96,7 @@
 <details class="menu">
   <summary>Manage<span class="sr-only"> {{ c.alias or c.hostname or c.mac }}</span></summary>
   <div class="menu-panel">
-    {{ label_form(c) }}
+    <div class="menu-device"><strong>{{ c.alias or c.hostname or c.mac }}</strong><span class="small muted mono">{{ c.ip or c.mac }}</span></div>
     {% if is_paused %}
     <form method="post" action="/actions/new">{{ hidden('resume_client', c.mac) }}
       <button class="primary wide">Resume internet</button></form>
@@ -110,7 +109,7 @@
       {% endfor %}
     </div>
     {% endif %}
-    <p class="menu-label">Speed limit</p>
+    <details class="menu-section"><summary>Speed limit{% if is_limited %}<span class="small muted">Active</span>{% endif %}</summary>
     <form method="post" action="/actions/new" class="limit-form">{{ hidden('limit_client', c.mac) }}
       <label>↓ Mbit/s<input name="down_mbps" type="number" min="0.1" max="1000" step="0.1" value="{{ '%g' % lim.down_mbps if lim else 10 }}" required></label>
       <label>↑ Mbit/s<input name="up_mbps" type="number" min="0.1" max="1000" step="0.1" value="{{ '%g' % lim.up_mbps if lim else 5 }}" required></label>
@@ -121,9 +120,12 @@
     <form method="post" action="/actions/new">{{ hidden('unlimit_client', c.mac) }}
       <button class="small text wide">Remove speed limit</button></form>
     {% endif %}
-    <p class="menu-label">Block websites</p>
+    </details>
+    <details class="menu-section"><summary>Block websites{% if has_sites %}<span class="small muted">Active</span>{% endif %}</summary>
     {{ sites_form('block_domains', 'unblock_domains', 'mac', c.mac, doms, has_sites) }}
     <p class="menu-note small muted">Blocked in the firewall's DNS for this device only (sites include their subdomains). Your network-wide blocklist still applies. Applying takes about a minute.</p>
+    </details>
+    <details class="menu-section"><summary>Name and icon</summary>{{ label_form(c) }}</details>
   </div>
 </details>
 {% endif %}

@@ -52,7 +52,7 @@ function paintLiveGraph(points) {
   const time = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   set("[data-live-start]", time(data.start)); set("[data-live-end]", time(data.end));
   set("[data-live-empty]", data.count < 2 ? "Collecting live samples…" : "");
-  set("title", `Live WAN rates. ${data.count} observed reports in the last three minutes; scale 0 to ${liveRate(data.ceiling)}.`);
+  set("title", `Live WAN rates. ${data.count} observed ${data.count === 1 ? "report" : "reports"} in the last three minutes; scale 0 to ${liveRate(data.ceiling)}.`);
 }
 // Polling never counts as user activity for the idle timeout.
 function startLive() {
@@ -62,6 +62,12 @@ function startLive() {
   const fast = !!main.querySelector("[data-live-rate], [data-live-client-rate]");
   const chip = document.getElementById("live"), text = document.getElementById("live-text");
   let paused = false, busy = false, liveBusy = false, last = Date.now(), failed = false, liveFailed = false, snapshot = null;
+  let paintScheduled = false, manualPaint = false;
+  const nodeCache = new Map();
+  const nodes = (selector) => {
+    if (!nodeCache.has(selector)) nodeCache.set(selector, [...main.querySelectorAll(selector)]);
+    return nodeCache.get(selector);
+  };
   const livePoints = [];
   let flowController = null;
   let stream = null, streamConnected = false, streamOpenedAt = 0, lastStreamAt = 0, streamRetryAt = 0;
@@ -69,15 +75,16 @@ function startLive() {
   const userBusy = () => {
     const a = document.activeElement;
     return (a && main.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName))
-      || main.querySelector("details[open]") || String(window.getSelection() || "").length > 0;
+      || [...main.querySelectorAll("details[open]")].some(el => !el.closest("details:not([open])"))
+      || String(window.getSelection() || "").length > 0;
   };
   const setText = (el, value) => { if (el.textContent !== value) el.textContent = value; };
   const paintSnapshot = () => {
     if (!snapshot) {
-      if (liveFailed) main.querySelectorAll("[data-live-status]").forEach((el) => setText(el, "Rate update failed; showing the page snapshot."));
+      if (liveFailed) nodes("[data-live-status]").forEach((el) => setText(el, "Rate update failed; showing the page snapshot."));
       return;
     }
-    main.querySelectorAll("[data-live-rate]").forEach((el) => {
+    nodes("[data-live-rate]").forEach((el) => {
       const iface = el.dataset.liveInterface;
       const data = iface === undefined ? snapshot.wan : snapshot.interfaces?.find((i) => i.name === iface);
       setText(el, (el.dataset.livePrefix || "") + liveRate(data?.[el.dataset.liveRate]));
@@ -86,20 +93,20 @@ function startLive() {
     const deviceAge = snapshot.clients_reported_at ? Date.now() / 1000 - snapshot.clients_reported_at : Infinity;
     const staleDevices = snapshot.clients_stale || deviceAge >= 5 || liveFailed;
     main.classList.toggle("device-rates-stale", staleDevices);
-    main.querySelectorAll("[data-live-client-rate]").forEach(el => {
+    nodes("[data-live-client-rate]").forEach(el => {
       const client = matchingLiveClient(clients.get(el.dataset.liveClient), el.dataset);
       setText(el, liveRate(client?.[el.dataset.liveClientRate]));
     });
-    main.querySelectorAll("[data-flow-client-rate]").forEach(el => {
+    nodes("[data-flow-client-rate]").forEach(el => {
       const client = matchingLiveClient(clients.get(el.dataset.liveClient), el.dataset);
       const level = flowLevel(client?.[el.dataset.flowClientRate], staleDevices);
       for (let n = 0; n <= 3; n++) el.classList.toggle(`lvl-${n}`, n === level);
     });
-    main.querySelectorAll("[data-live-device-status]").forEach(el => setText(el,
-      snapshot.clients_reported_at ? `Device rates reported ${Math.max(0, Math.floor(deviceAge))} s ago${staleDevices ? " · stale" : ""}. Firewall-observed traffic; names and policy states refresh every 30 s.`
-      : "Live device counters unavailable. Names and policy states refresh every 30 s."));
+    nodes("[data-live-device-status]").forEach(el => setText(el,
+      snapshot.clients_reported_at ? `Devices · ${Math.max(0, Math.floor(deviceAge))} s ago${staleDevices ? " · stale" : ""} · details every 30 s`
+      : "Device rates unavailable · details every 30 s"));
     const ceiling = Math.max(1, ...(snapshot.interfaces || []).flatMap(i => [i.rx_bps, i.tx_bps]).filter(v => typeof v === "number" && Number.isFinite(v)));
-    main.querySelectorAll("[data-live-bars]").forEach(svg => {
+    nodes("[data-live-bars]").forEach(svg => {
       const iface = snapshot.interfaces?.find(i => i.name === svg.dataset.liveBars);
       const wan = svg.dataset.barsWan === "true";
       for (const [lane, field] of [["down", wan ? "rx_bps" : "tx_bps"], ["up", wan ? "tx_bps" : "rx_bps"]]) {
@@ -110,8 +117,8 @@ function startLive() {
     });
     const rateAge = snapshot.reported_at ? Date.now() / 1000 - snapshot.reported_at : Infinity;
     const staleRates = snapshot.stale || rateAge >= (snapshot.source === "live" ? 5 : 120);
-    main.querySelectorAll(".flow-wrap").forEach(el => el.classList.toggle("stale-flow", staleRates || liveFailed));
-    main.querySelectorAll("[data-flow-rate]").forEach(el => {
+    nodes(".flow-wrap").forEach(el => el.classList.toggle("stale-flow", staleRates || liveFailed));
+    nodes("[data-flow-rate]").forEach(el => {
       const iface = snapshot.interfaces?.find(i => i.name === el.dataset.flowInterface);
       const rate = iface?.[el.dataset.flowRate];
       const level = flowLevel(rate, staleRates || liveFailed);
@@ -119,15 +126,27 @@ function startLive() {
     });
     const gatewayAge = snapshot.telemetry_reported_at ? Date.now() / 1000 - snapshot.telemetry_reported_at : Infinity;
     const state = snapshot.gateway_stale || gatewayAge >= 120 ? "stale" : snapshot.gateway?.online === true ? "online" : snapshot.gateway?.online === false ? "offline" : "unknown";
-    main.querySelectorAll("[data-gateway-status]").forEach(el => setText(el, state));
-    main.querySelectorAll("[data-flow-gateway]").forEach(el => {
+    nodes("[data-gateway-status]").forEach(el => setText(el, state));
+    nodes("[data-flow-gateway]").forEach(el => {
       el.classList.toggle("ok", state === "online"); el.classList.toggle("bad", state === "offline");
       el.classList.toggle("unknown", state !== "online" && state !== "offline");
     });
     const age = snapshot.reported_at ? Math.max(0, Math.floor(Date.now() / 1000 - snapshot.reported_at)) : null;
-    main.querySelectorAll("[data-live-status]").forEach((el) => setText(el,
+    nodes("[data-live-status]").forEach((el) => setText(el,
       liveFailed ? "Rate update failed; showing last known values."
-      : `Rates reported ${age === null ? "at an unknown time" : age + " s ago"}${snapshot.stale || age >= (snapshot.source === "telemetry" ? 120 : 5) ? " · stale" : ""}${snapshot.source === "telemetry" ? " · full-report fallback (30 s)" : ""}.`));
+      : `Rates · ${age === null ? "time unknown" : age + " s ago"}${snapshot.stale || age >= (snapshot.source === "telemetry" ? 120 : 5) ? " · stale" : ""}${snapshot.source === "telemetry" ? " · full-report fallback (30 s)" : ""}`));
+  };
+  // Coalesce SSE + timer/fragment work into one paint. Cache mounted nodes until a fragment changes.
+  const queuePaint = () => {
+    if (paintScheduled) return;
+    paintScheduled = true;
+    requestAnimationFrame(() => {
+      paintScheduled = false;
+      if (document.hidden) return;
+      paintSnapshot();
+      if (fast && (!paused || manualPaint) && !userBusy()) paintLiveGraph(livePoints);
+      manualPaint = false;
+    });
   };
   const label = () => {
     main.classList.toggle("live-paused", paused);
@@ -135,14 +154,14 @@ function startLive() {
       chip.classList.toggle("paused", paused); chip.classList.toggle("error", (failed || liveFailed) && !paused);
       if (text) setText(text, paused ? "Paused" : failed || liveFailed ? "Retrying" : "Live");
       chip.setAttribute("aria-pressed", String(!paused));
+      chip.setAttribute("aria-label", `${paused ? "Resume" : "Pause"} automatic updates`);
       chip.title = `Click to ${paused ? "resume" : "pause"} updates.`;
     }
     const status = document.getElementById("refresh-status");
-    if (status) setText(status, paused ? "Automatic updates paused. Use Refresh for a manual update."
+    if (status) setText(status.querySelector("[data-refresh-message]") || status, paused ? "Updates paused · use Refresh for a manual update"
       : failed ? "History refresh failed; displayed history may be stale."
-      : `${fast ? streamConnected && Date.now() - lastStreamAt < 4000 ? "Live stream · 1 s · " : "Live JSON fallback · 1 s · " : ""}History/details refresh every ${every} s · last refreshed ${new Date(last).toLocaleTimeString()}. Times shown in ${status.dataset.tz || "your time zone"}.`);
-    paintSnapshot();
-    if (fast && !paused && !document.hidden && !userBusy()) paintLiveGraph(livePoints);
+      : `${fast ? streamConnected && Date.now() - lastStreamAt < 4000 ? "Live stream · 1 s" : stream ? "Connecting to live stream" : "Live JSON fallback · 1 s" : "Auto-update"} · details ${every} s · updated ${new Date(last).toLocaleTimeString()}`);
+    queuePaint();
   };
   async function request(url, json, controller = new AbortController()) {
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -162,8 +181,8 @@ function startLive() {
     try {
       const html = await request(window.location.href, false);
       if (html === null || userBusy() || document.hidden || (!force && paused) || expanded !== flowOpen()) return;
-      patchFragment(main, html); placeFlowControls(); watchFlow();
-      last = Date.now(); failed = false; paintSnapshot();
+      patchFragment(main, html); nodeCache.clear(); placeFlowControls(); watchFlow();
+      last = Date.now(); failed = false; queuePaint();
     } catch (_) { failed = true; }
     finally { busy = false; label(); }
   }
@@ -222,7 +241,7 @@ function startLive() {
       const template = document.createElement("template"); template.innerHTML = html;
       const fresh = template.content.querySelector("#flow-panel");
       if (!fresh) throw new Error("Missing network map");
-      patchNode(panel, fresh, true); placeFlowControls(); watchFlow(); paintSnapshot();
+      patchNode(panel, fresh, true); nodeCache.clear(); placeFlowControls(); watchFlow(); queuePaint();
     } catch (error) {
       if (controller === flowController) {
         const status = panel.querySelector("[data-flow-load-status]");
@@ -230,7 +249,7 @@ function startLive() {
       }
     } finally { if (controller === flowController) panel.removeAttribute("aria-busy"); }
   }
-  const refresh = () => { tick(true); tickRates(true); tickFlow(true); openStream(); };
+  const refresh = () => { openStream(); return Promise.allSettled([tick(true), tickRates(true), tickFlow(true)]); };
   chip?.addEventListener("click", () => {
     paused = !paused;
     try { localStorage.setItem("portal-live-paused", paused ? "1" : "0"); } catch (_) {}
@@ -239,7 +258,13 @@ function startLive() {
   });
   document.addEventListener("visibilitychange", () => { if (document.hidden) closeStream(); else if (!paused) refresh(); });
   window.addEventListener("pagehide", closeStream);
-  document.getElementById("refresh-now")?.addEventListener("click", refresh);
+  const refreshButton = document.getElementById("refresh-now");
+  refreshButton?.addEventListener("click", async () => {
+    if (refreshButton.disabled) return;
+    refreshButton.disabled = true; refreshButton.setAttribute("aria-busy", "true");
+    try { await refresh(); manualPaint = true; queuePaint(); }
+    finally { refreshButton.disabled = false; refreshButton.removeAttribute("aria-busy"); }
+  });
   document.addEventListener("portal:refresh", () => tick(true));
   document.addEventListener("portal:flow", () => tickFlow(true));
   setInterval(() => tick(), every * 1000);

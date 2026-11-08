@@ -1,10 +1,9 @@
 {% import "_device.html" as dev with context %}
 <section class="card" data-client-owned data-refresh-section="overview-8" id="flow-panel">
-  <div class="card-head"><div><h2>Network flow</h2><p class="muted small">Devices reported {{ last_seen | ts }}{% if not agent_online %} · stale{% endif %}{% if session.is_operator %} · Click a network to show its devices, then select a device to pause it, cap its speed or block sites{% endif %}</p></div><div class="legend"><span class="lane-key down"></span>download <span class="lane-key up"></span>upload <span class="lane-key blocked"></span>paused
+  <div class="card-head"><div><h2>Network flow</h2><p class="muted small">Select a network to explore its devices.{% if session.is_operator %} <a href="/help#device">Device controls guide</a>{% endif %}</p></div><div class="legend"><span class="lane-key down"></span>download <span class="lane-key up"></span>upload <span class="lane-key blocked"></span>paused
     {% set all_open = flow_segments and flow_segments | selectattr('open') | list | length == flow_segments | length %}
     <button type="button" class="small text flow-all" data-flow-all="{{ '' if all_open else '*' }}">{{ 'Hide devices' if all_open else 'Show all devices' }}</button></div></div>
-  <p class="small muted" data-live-status>Connecting to one-second live rates…</p>
-  <p class="small muted" data-live-device-status>Device rates cover traffic observed by this firewall. Names and policy states refresh separately.</p>
+  <div class="telemetry-meta"><span data-live-status>Connecting to live rates…</span><span data-live-device-status>Device details refresh every 30 s</span></div>
   <p class="small muted" data-flow-load-status role="status"></p>
   <div class="flow-wrap {{ 'stale-flow' if not agent_online }}"><div class="flow-canvas">{{ flow_map(flow_gw, flow_wan, flow_segments, flow_height) }}
     {% if session.is_operator %}{% for s in flow_segments %}{% for d in s.devices %}<div class="flow-ctrl{{ ' compact' if s.compact }}" data-refresh-section="control-{{ d.mac }}" data-top="{{ d.top_pct }}" data-h="{{ d.h_pct }}">{{ dev.menu(d) }}</div>{% endfor %}{% endfor %}{% endif %}

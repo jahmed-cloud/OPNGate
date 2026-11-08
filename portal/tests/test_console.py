@@ -25,7 +25,7 @@ def test_network_workspace_authentication_and_no_history(browser,monkeypatch):
     sign_in(browser)
     monkeypatch.setattr(metrics,'window',lambda *a:pytest.fail('network inventory queried history'))
     page=browser.get('/networks')
-    assert page.status_code==200 and '1 devices online' in page.text
+    assert page.status_code==200 and '1 device online' in page.text
     assert 'data-live-interface="igc1"' in page.text
     assert 'data-live-rate="tx_bps"' in page.text
     result=browser.get('/api/console')
@@ -49,6 +49,20 @@ def test_live_network_binding_cannot_cross_segments(browser,monkeypatch):
     monkeypatch.setattr(live,'snapshot',lambda:frame)
     lan=inventory.snapshot()['networks'][1]
     assert lan['name']=='LAN' and lan['down_bps']==8000
+
+
+@pytest.mark.parametrize('stale',[False,True])
+def test_networks_use_authoritative_live_freshness_for_fractional_timestamps(browser,monkeypatch,stale):
+    now=db.now()
+    frame=live.snapshot()
+    frame.update(source='live',reported_at=now+0.75,stale=stale,
+                 interfaces=[{'name':'igc1','segment':'LAN','rx_bps':1000,'tx_bps':8000}])
+    monkeypatch.setattr(db,'now',lambda:now)
+    monkeypatch.setattr(live,'snapshot',lambda:frame)
+    lan=inventory.snapshot()['networks'][1]
+    assert lan['reported_at']==now+0.75
+    assert lan['stale'] is stale
+    assert lan['down_bps']==(None if stale else 8000)
 
 
 def test_blocking_help_is_authenticated_and_explains_scope(browser):

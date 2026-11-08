@@ -36,3 +36,11 @@ Use the configured virtual environment. Windows TestClient may need normal local
 
 
 Post-deployment verification (2026-11-01): current snapshot reads on the services Pi measured 0.361 ms median (20 reads), representative JSON 822 bytes. Six successive observed report timestamps advanced exactly 2 s apart and no extra historical rows were written in the 12 s diagnostic. A signed-in production browser plotted real live reports without console errors and retained its rolling chart across manual refresh. See STATUS.md for precise scope and remaining observation work.
+
+## Browser painting and UI stability (2026-11-08)
+
+The 2.0.2 follow-up batches live text/chart paints into one animation frame when SSE, timer or fragment work overlaps. Browser observations are still collected individually and retained within the existing 180-point history; coalescing rendering does not discard observations. Live element queries are cached for the mounted page and invalidated after main/map fragment reconciliation. One-second collection/transport and 30/60-second metadata/history work remain unchanged.
+
+The stream harness verifies one paint for a burst of reports, retention of each observed point, reuse/invalidation of mounted node references, manual chart refresh while paused, and correct handling of hidden nested menu sections. These assertions establish reduced redundant work, not a measured production frame-rate gain. The full Python suite has 180 passing tests.
+
+UI stability changes include fixed minimum rate-column widths, contained table scrolling, bounded dropdowns/tooltips, shorter status text and stable scrollbar space. Mobile keyboard/navigation and 320/390-pixel layouts were checked with sample data. The Networks freshness fix also removes false stale labels caused by comparing fractional received timestamps with integer time. Current production verification belongs in STATUS.md.

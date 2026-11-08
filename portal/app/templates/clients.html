@@ -1,29 +1,29 @@
 {% extends "base.html" %}
 {% import "_device.html" as dev with context %}
-{% block title %}Clients · {{ rp_name }}{% endblock %}
+{% block title %}Devices · {{ rp_name }}{% endblock %}
 {% block content %}
 <div class="page-head">
   <div><p class="eyebrow">Devices</p><h1>Devices <span class="muted">{{ rows | length }}</span></h1>
-    <p class="page-description">Live speed per device. Pausing, limiting or blocking sites for a device is signed with your security key and checked by the firewall.</p></div>
+    <p class="page-description">Connected devices, live traffic and internet access controls.</p></div>
   <form class="filters" method="get">
     <input name="q" value="{{ q }}" placeholder="Name, IP, MAC or maker" aria-label="Search clients" maxlength="200">
-    <select name="segment" aria-label="Segment"><option value="">All segments</option>
+    <select name="segment" aria-label="Network"><option value="">All networks</option>
       {% for s in segments %}<option {{ 'selected' if s == segment }}>{{ s }}</option>{% endfor %}</select>
     <select name="show" aria-label="Which devices"><option value="online" {{ 'selected' if show == 'online' }}>Online now</option>
-      <option value="all" {{ 'selected' if show == 'all' }}>All ever seen</option></select>
+      <option value="all" {{ 'selected' if show == 'all' }}>All devices</option></select>
     <button>Filter</button>
   </form>
 </div>
-<p class="small muted">To block a device: <strong>Manage → Pause internet → choose duration → Approve with security key</strong>. <a href="/help#device">Blocking guide</a></p>
+<p class="context-help"><strong>Device controls</strong><span>Manage → choose an action → approve with your security key.</span><a href="/help#device">Blocking guide</a></p>
 {% if limited %}<p class="banner warn">Showing the first 500 matching devices. Narrow your search or segment.</p>{% endif %}
 <section class="card scroll">
 <table class="clients">
-  <thead><tr><th>Device</th><th>Address</th><th>Segment</th><th class="num">Download</th><th class="num">Upload</th><th>Status</th><th>Last active</th>{% if session.is_operator %}<th><span class="sr-only">Manage</span></th>{% endif %}</tr></thead>
+  <thead><tr><th>Device</th><th>Address</th><th>Network</th><th class="num">Download</th><th class="num">Upload</th><th>Status</th><th title="Device inventory timestamp; live rates update separately">Last seen</th>{% if session.is_operator %}<th><span class="sr-only">Manage</span></th>{% endif %}</tr></thead>
   <tbody>
   {% for c in rows %}
   <tr class="{{ 'offline' if not c.online }}" data-refresh-section="client-{{ c.mac }}">
     <td><div class="device"><span class="kind-box">{{ device_icon(c) }}<span class="dot {{ 'on' if c.online else 'off' }}" title="{{ 'online' if c.online else 'offline' }}"></span></span>
-      <div><strong>{{ c.alias or c.hostname or '(no name)' }}</strong><div class="small muted">{% if c.alias and c.hostname %}{{ c.hostname }} · {% endif %}{{ c.vendor or 'Unknown maker' }}</div></div></div></td>
+      <div class="device-copy"><strong title="{{ c.alias or c.hostname or '(no name)' }}">{{ c.alias or c.hostname or '(no name)' }}</strong><div class="small muted">{% if c.alias and c.hostname %}{{ c.hostname }} · {% endif %}{{ c.vendor or 'Unknown maker' }}</div></div></div></td>
     <td><span class="mono">{{ c.ip or '—' }}</span><div class="small muted mono">{{ c.mac }}</div></td>
     <td>{{ c.segment or '—' }}</td>
     <td class="num speed down" data-live-client="{{ c.mac }}" data-client-ip="{{ c.ip or '' }}" data-client-segment="{{ c.segment or '' }}" data-live-client-rate="down_bps">{{ c.down_bps | bps if c.online else '—' }}</td>
@@ -38,6 +38,6 @@
   </tbody>
 </table>
 </section>
-<p class="muted small" data-live-status>Connecting to one-second live rates…</p>
-<p class="muted small" data-live-device-status>Device rates cover firewall-observed traffic. Names and policy states refresh every 30 s.</p>
+<div class="telemetry-meta"><span data-live-status>Connecting to live rates…</span><span data-live-device-status>Device details refresh every 30 s</span></div>
+<p class="small muted">Rates cover traffic observed by the firewall.</p>
 {% endblock %}

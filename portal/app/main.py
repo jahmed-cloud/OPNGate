@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="OPNGate", version="2.0.1", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app = FastAPI(title="OPNGate", version="2.0.2", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 app.add_middleware(BrowserBodyLimit)
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 app.include_router(auth.router)
