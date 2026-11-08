@@ -6,9 +6,9 @@ OPNsense handles routing, firewalling, DNS and VPNs. OPNGate provides the manage
 
 Previously **WAF-OPNsense**. Source: [jahmed-cloud/OPNGate](https://github.com/jahmed-cloud/OPNGate). This is an independent home-lab project.
 
-![Overview reference with sample data](docs/screenshots/overview-dark.png)
+![OPNGate Networks workspace with sample data](docs/screenshots/networks-dark.jpg)
 
-The screenshots show an earlier release under the previous name, with invented devices and sample addresses. The OPNGate rebuild keeps the sidebar layout and orange theme.
+The preview shows OPNGate 2.0.2 with invented sample data. The sidebar layout and orange theme are retained.
 
 ## Start deployment
 
