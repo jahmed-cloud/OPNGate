@@ -75,3 +75,17 @@ def test_blocking_help_is_authenticated_and_explains_scope(browser):
         assert text in page.text
     assert 'id="approve-action"' not in page.text
     assert 'Blocking guide' in browser.get('/clients').text
+
+
+def test_about_page_and_support_links_come_from_one_place(browser):
+    from app.author import AUTHOR
+    assert browser.get('/about',follow_redirects=False).status_code==303
+    sign_in(browser)
+    page=browser.get('/about')
+    assert page.status_code==200 and AUTHOR['name'] in page.text and f'mailto:{AUTHOR["email"]}' in page.text
+    for key in ('website','github','sponsor'):
+        assert f'href="{AUTHOR[key]}" target="_blank" rel="noopener noreferrer"' in page.text
+    assert 'aria-current="page"' in page.text and '>About</a>' in page.text
+    # Every signed-in page carries the sidebar Sponsor link and the footer credit.
+    other=browser.get('/help').text
+    assert f'class="sponsor-link" href="{AUTHOR["sponsor"]}"' in other and f'Built by {AUTHOR["name"]}' in other
