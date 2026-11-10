@@ -674,3 +674,15 @@ svg[data-tips] { cursor: crosshair; }
   #refresh-now .refresh-icon { animation: none !important; }
   .sidebar { transition: none; }
 }
+
+/* Author and support links (values in app/author.py). */
+.sponsor-link { display: flex; width: fit-content; align-items: center; gap: 6px; margin-bottom: 10px; padding: 4px 10px; border: 1px solid var(--nav-muted);
+  border-radius: 999px; color: var(--nav-text); font-weight: 500; }
+.sponsor-link span, .button-link.sponsor span { color: var(--primary); }
+.sponsor-link:hover { border-color: var(--primary); text-decoration: none; }
+.button-link.sponsor { margin-top: 4px; }
+.button-link.sponsor:hover { border-color: var(--primary); }
+.about-links { list-style: none; margin: 0; padding: 0; }
+.about-links li { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--outline-soft); overflow-wrap: anywhere; }
+.about-links li:last-child { border-bottom: 0; }
+.about-links .muted { min-width: 64px; }

@@ -42,6 +42,17 @@ Partial installs stop for inspection. Fresh installation still requires the prer
 
 Read [installation](docs/INSTALL.md), [the runbook](docs/RUNBOOK.md) and [hostname migration](docs/HOSTNAME_MIGRATION.md) before deploying. Real settings, certificates, databases and private keys stay out of Git.
 
+### Prebuilt Docker images
+
+Multi-arch (amd64, arm64) images are on Docker Hub: [`jahmed22/opngate-portal`](https://hub.docker.com/r/jahmed22/opngate-portal) (portal, ingest API and WAF log shipper) and [`jahmed22/opngate-caddy`](https://hub.docker.com/r/jahmed22/opngate-caddy) (Caddy with the Coraza WAF and CrowdSec bouncer). [`docker-compose.example.yml`](docker-compose.example.yml) runs the same stack from them, one Compose profile per host:
+
+```sh
+docker compose -f docker-compose.example.yml --env-file deploy/services/.env --profile services up -d
+docker compose -f docker-compose.example.yml --env-file deploy/edge/.env --profile edge up -d
+```
+
+It still needs the private PKI from `deploy/pki`, the CrowdSec files under `deploy/*/crowdsec` and filled-in `.env` files.
+
 ## The console
 
 - **Overview:** Internet state, latency, packet loss, availability, current throughput, alerts and expandable network flow.
@@ -103,5 +114,11 @@ node portal/tests/test_live_stream.cjs
 ```
 
 For local development, set `PORTAL_DEV=1`, generate the local encryption key with `python -m app.cli gen-key`, create a user with `python -m app.cli create-user admin --role operator`, and start `uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers` from `portal/`. Development mode is for localhost.
+
+## Support the project
+
+If OPNGate is useful to you, please [sponsor its development](https://github.com/sponsors/jahmed-cloud) and star this repository on GitHub. Both help keep the project going.
+
+Built by Junaid Ahmed — [jahmed.cloud](https://jahmed.cloud)
 
 [Metrics](docs/METRICS.md) · [Live stream](docs/LIVE_STREAM.md) · [Performance](docs/PERFORMANCE.md) · [Project status](docs/STATUS.md) · [Blocking guide](docs/BLOCKING.md) · [Security assessment](docs/SECURITY_ASSESSMENT.md) · [Review](REVIEW.md) · [Community announcement](docs/COMMUNITY_POST.md)

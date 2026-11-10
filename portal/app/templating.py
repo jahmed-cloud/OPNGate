@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
 from . import devices, identity, interface_icons
+from .author import AUTHOR
 from .config import settings
 
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -24,11 +25,13 @@ NAV = [
     ("Network", [("/networks", "Networks", "networks"), ("/clients", "Devices", "clients")]),
     ("Security", [("/threats", "Threats", "threats"), ("/alerts", "Alerts", "alerts")]),
     ("Control", [("/actions", "Actions", "actions")]),
-    ("Admin", [("/audit", "Audit log", "audit"), ("/help", "Help & guides", "help"), ("/security", "Account security", "security")]),
+    ("Admin", [("/audit", "Audit log", "audit"), ("/help", "Help & guides", "help"), ("/security", "Account security", "security"),
+               ("/about", "About", "about")]),
 ]
 # 24x24 stroke icons for the drawer.
 NAV_ICONS = {
     "help": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9a2.5 2.5 0 1 1 4 2L12 12v2M12 17h.01",
+    "about": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7.5h.01",
     "networks": "M9 3h6v5H9zM3 16h6v5H3zM15 16h6v5h-6zM12 8v4M6 16v-4h12v4",
     "overview": "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
     "traffic": "M3 17l6-6 4 4 8-8M15 7h6v6",
@@ -618,4 +621,4 @@ def interface_icon(segment="", interface="", wan=False):
                   f'<title>{label}</title><path d="{interface_icons.ICONS[what]}"/></svg>')
 
 
-templates.env.globals.update(device_kinds=devices.LABELS, interface_icon=interface_icon, traffic_chart=traffic_chart, rate_bars=rate_bars, block_lists=devices.BLOCK_LISTS, device_icon=device_icon, sparkline=sparkline, time_chart=time_chart, waf_chart=waf_chart, uptime_bar=uptime_bar, flow_map=flow_map)
+templates.env.globals.update(author=AUTHOR, device_kinds=devices.LABELS, interface_icon=interface_icon, traffic_chart=traffic_chart, rate_bars=rate_bars, block_lists=devices.BLOCK_LISTS, device_icon=device_icon, sparkline=sparkline, time_chart=time_chart, waf_chart=waf_chart, uptime_bar=uptime_bar, flow_map=flow_map)

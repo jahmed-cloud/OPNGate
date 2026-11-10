@@ -8,7 +8,7 @@
 <meta name="csrf" content="{{ csrf }}">
 <title>{% block title %}{{ rp_name }}{% endblock %}</title>
 <link rel="icon" href="/static/logo.svg?v=2" type="image/svg+xml">
-<link rel="stylesheet" href="/static/portal.css?v=39">
+<link rel="stylesheet" href="/static/portal.css?v=40">
 <script src="/static/theme.js?v=9"></script>
 <script src="/static/console/credentials.js?v=1" defer></script>
 <script src="/static/console/dom.js?v=1" defer></script>
@@ -37,7 +37,8 @@
     {% endfor %}
     {% endfor %}
   </nav>
-  <div class="sidebar-foot"><span>Signed in as <strong>{{ session.username }}</strong> · {{ session.role }}</span>
+  <div class="sidebar-foot"><a class="sponsor-link" href="{{ author.sponsor }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">♥</span> Sponsor</a>
+    <span>Signed in as <strong>{{ session.username }}</strong> · {{ session.role }}</span>
     <form method="post" action="/logout" class="sidebar-signout"><input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="small">Sign out</button></form>
   </div>
 </aside>
@@ -71,7 +72,7 @@
 {% block content %}{% endblock %}
 {% if not fragment %}
 </main>
-{% if session %}<footer class="app-footer">OPNGate · Gateway operations <span>Times shown in {{ tz_name }}</span></footer>{% endif %}
+{% if session %}<footer class="app-footer"><span>OPNGate · Gateway operations</span><span>Built by {{ author.name }} · <a href="{{ author.website }}" target="_blank" rel="noopener noreferrer">{{ author.website_label }}</a></span><span>Times shown in {{ tz_name }}</span></footer>{% endif %}
 </div>
 </div>
 </body>

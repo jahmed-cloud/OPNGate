@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}About · {{ rp_name }}{% endblock %}
+{% block content %}
+<div class="page-head"><div><p class="eyebrow">About</p><h1>{{ rp_name }}</h1>
+  <p class="page-description">Built by {{ author.name }}.</p></div></div>
+<div class="grid2">
+<section class="card" id="author">
+  <h2>{{ author.name }}</h2>
+  <ul class="about-links">
+    <li><span class="muted">Website</span> <a href="{{ author.website }}" target="_blank" rel="noopener noreferrer">{{ author.website_label }}</a></li>
+    <li><span class="muted">GitHub</span> <a href="{{ author.github }}" target="_blank" rel="noopener noreferrer">{{ author.github | replace('https://', '') }}</a></li>
+    <li><span class="muted">Email</span> <a href="mailto:{{ author.email }}">{{ author.email }}</a></li>
+  </ul>
+</section>
+<section class="card" id="support">
+  <h2>Support this project</h2>
+  <p>If {{ rp_name }} helps you run your network, you can support its development through GitHub Sponsors.</p>
+  <a class="button-link sponsor" href="{{ author.sponsor }}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">♥</span>&nbsp;Sponsor</a>
+</section>
+</div>
+{% endblock %}

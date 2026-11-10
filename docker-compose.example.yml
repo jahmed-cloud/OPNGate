@@ -1,0 +1,178 @@
+# OPNGate from the published Docker Hub images instead of local builds. Same stack as deploy/services and
+# deploy/edge; each host starts its own part with a Compose profile. Images are multi-arch (amd64, arm64).
+#
+#   Services host (portal, ingest API, CrowdSec central API):
+#     cp deploy/services/.env.example deploy/services/.env   # fill it in
+#     docker compose -f docker-compose.example.yml --env-file deploy/services/.env --profile services up -d
+#
+#   Edge host (Caddy with Coraza WAF + CrowdSec bouncer, CrowdSec agent, WAF log shipper):
+#     cp deploy/edge/.env.example deploy/edge/.env           # fill it in
+#     docker compose -f docker-compose.example.yml --env-file deploy/edge/.env --profile edge up -d
+#
+# Both need the private PKI from deploy/pki (deploy/pki/out/...) and the CrowdSec files under deploy/*/crowdsec.
+# Never commit the .env files or deploy/pki/out. See README.md for the full deployment.
+
+name: opngate
+
+x-portal-image: &portal-image docker.io/jahmed22/opngate-portal:2.0.2
+
+networks:
+  services:
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  portal-data:
+  portal-live:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=16m,uid=10001,gid=10001,mode=0700"
+  crowdsec-db:
+  crowdsec-config:
+  caddy-logs:
+  caddy-data:
+  shipper-state:
+
+x-portal: &portal
+  image: *portal-image
+  profiles: [services]
+  networks: [services]
+  volumes:
+    - portal-data:/data
+    - portal-live:/run/portal-live
+    - ./deploy/pki/out/services.crt:/pki/services.crt:ro
+    - ./deploy/pki/out/services.key:/pki/services.key:ro
+    - ./deploy/pki/out/ingest-ca.pem:/pki/ingest-ca.pem:ro
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+services:
+  # ---- services host --------------------------------------------------------------------------------
+  portal:
+    <<: *portal
+    env_file: deploy/services/.env
+    environment:
+      PORTAL_RP_ID: ${PORTAL_SUBDOMAIN:-opngate}.${DOMAIN}
+      PORTAL_LIVE_DIR: /run/portal-live
+      PORTAL_ORIGIN: https://${PORTAL_SUBDOMAIN:-opngate}.${DOMAIN}
+      PORTAL_COOKIE_DOMAIN: ${DOMAIN}
+      # Docker's port publishing keeps the real source IP, so this is the edge host's address.
+      PORTAL_TRUSTED_PROXIES: ${EDGE_HOST_IP:-}/32
+      PORTAL_CROWDSEC_LAPI: http://crowdsec:8080
+      PORTAL_CROWDSEC_KEY: ${CROWDSEC_PORTAL_KEY:-}
+    command: >
+      uvicorn app.main:app --host 0.0.0.0 --port 9443 --no-proxy-headers
+      --ssl-certfile /pki/services.crt --ssl-keyfile /pki/services.key
+    ports:
+      - "${SERVICES_HOST_IP:-127.0.0.1}:9443:9443"
+
+  portal-ingest:
+    <<: *portal
+    env_file: deploy/services/.env
+    environment:
+      PORTAL_RP_ID: ${PORTAL_SUBDOMAIN:-opngate}.${DOMAIN}
+      PORTAL_LIVE_DIR: /run/portal-live
+      PORTAL_ORIGIN: https://${PORTAL_SUBDOMAIN:-opngate}.${DOMAIN}
+    command: >
+      uvicorn app.ingest:ingest_app --host 0.0.0.0 --port 9444
+      --ssl-certfile /pki/services.crt --ssl-keyfile /pki/services.key
+      --ssl-ca-certs /pki/ingest-ca.pem --ssl-cert-reqs 2
+    ports:
+      - "${SERVICES_HOST_IP:-127.0.0.1}:9444:9444"
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:v1.6.8
+    profiles: [services]
+    networks: [services]
+    environment:
+      COLLECTIONS: crowdsecurity/linux
+      BOUNCER_KEY_caddy: ${CROWDSEC_CADDY_KEY:-}
+      BOUNCER_KEY_opnsense: ${CROWDSEC_OPNSENSE_KEY:-}
+      BOUNCER_KEY_portal: ${CROWDSEC_PORTAL_KEY:-}
+    volumes:
+      - crowdsec-db:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+      - ./deploy/services/crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./deploy/services/crowdsec/parsers/portal-auth.yaml:/etc/crowdsec/parsers/s01-parse/portal-auth.yaml:ro
+      - ./deploy/services/crowdsec/parsers/home-whitelist.yaml:/etc/crowdsec/parsers/s02-enrich/home-whitelist.yaml:ro
+      - ./deploy/services/crowdsec/scenarios/portal-auth-bf.yaml:/etc/crowdsec/scenarios/portal-auth-bf.yaml:ro
+      - portal-data:/var/log/portal-data:ro
+    ports:
+      - "${SERVICES_HOST_IP:-127.0.0.1}:9080:8080"
+    restart: unless-stopped
+
+  # ---- edge host ------------------------------------------------------------------------------------
+  caddy:
+    image: docker.io/jahmed22/opngate-caddy:2.11.6
+    profiles: [edge]
+    environment:
+      DOMAIN: ${DOMAIN}
+      PORTAL_HOSTS: ${PORTAL_HOSTS:-opngate.${DOMAIN}}
+      PORTAL_UPSTREAM: ${SERVICES_HOST_IP:-}:9443
+      CROWDSEC_LAPI: http://${SERVICES_HOST_IP:-}:9080
+      CROWDSEC_CADDY_KEY: ${CROWDSEC_CADDY_KEY:-}
+      WAF_MODE: ${WAF_MODE:-DetectionOnly}
+    volumes:
+      - ./deploy/edge/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/pki/out/ingest-ca.pem:/pki/ingest-ca.pem:ro
+      - caddy-logs:/var/log/caddy
+      - caddy-data:/data
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    networks:
+      edge: { ipv4_address: 172.30.0.3 }
+    restart: unless-stopped
+
+  crowdsec-agent:
+    image: crowdsecurity/crowdsec:v1.6.8
+    profiles: [edge]
+    environment:
+      DISABLE_LOCAL_API: "true"
+      LOCAL_API_URL: http://${SERVICES_HOST_IP:-}:9080
+      AGENT_USERNAME: edge
+      AGENT_PASSWORD: ${CROWDSEC_EDGE_PASSWORD:-}
+      COLLECTIONS: >-
+        crowdsecurity/caddy crowdsecurity/base-http-scenarios crowdsecurity/http-cve
+        crowdsecurity/whitelist-good-actors
+    volumes:
+      - crowdsec-db:/var/lib/crowdsec/data
+      - crowdsec-config:/etc/crowdsec
+      - ./deploy/edge/crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./deploy/edge/crowdsec/parsers/home-whitelist.yaml:/etc/crowdsec/parsers/s02-enrich/home-whitelist.yaml:ro
+      - caddy-logs:/var/log/caddy:ro
+    networks:
+      edge: { ipv4_address: 172.30.0.5 }
+    restart: unless-stopped
+
+  waf-shipper:
+    image: *portal-image
+    profiles: [edge]
+    command: python -m app.waflog ship
+    environment:
+      PORTAL_SHIP_URL: https://${SERVICES_HOST_IP:-}:9443/internal/waf-hits
+      PORTAL_SHIP_CA: /pki/ingest-ca.pem
+      PORTAL_WAF_SHIP_TOKEN: ${PORTAL_WAF_SHIP_TOKEN:-}
+      PORTAL_CADDY_ACCESS_LOG: /logs/caddy/access.log
+      PORTAL_CORAZA_AUDIT_LOG: /logs/caddy/coraza-audit.log
+      PORTAL_DATA_DIR: /data
+    volumes:
+      - caddy-logs:/logs/caddy:ro
+      - shipper-state:/data
+      - ./deploy/pki/out/ingest-ca.pem:/pki/ingest-ca.pem:ro
+    networks:
+      edge: { ipv4_address: 172.30.0.6 }
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped

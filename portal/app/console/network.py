@@ -18,6 +18,11 @@ def help_page(request: Request, session: Session = Depends(require_user)):
     return render(request, "help.html", session=session)
 
 
+@router.get("/about")
+def about_page(request: Request, session: Session = Depends(require_user)):
+    return render(request, "about.html", session=session)
+
+
 @router.get("/networks")
 def networks(request: Request, session: Session = Depends(require_user)):
     data = inventory.snapshot()
