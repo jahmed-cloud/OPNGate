@@ -50,6 +50,13 @@
 			# on other sites/paths and inspect all Vaultwarden request payloads.
 			SecRule REQUEST_HEADERS:Host "@streq vault.{$DOMAIN}" "id:10001,phase:1,pass,nolog,chain"
 			SecRule REQUEST_URI "@beginsWith /api/" "t:none,setvar:'tx.allowed_methods=GET HEAD POST OPTIONS PUT PATCH DELETE'"
+			# QNAP QTS on drive: its desktop loads /cgi-bin/qpkg/*/config.json and posts to /cgi-bin/sys/, which the
+			# restricted-file rule reads as attacks, and a toolbar icon URL carries a literal ${URL_RANDOM_NUM;}.
+			# Only under /cgi-bin/ on drive; scanner probes elsewhere (/.git/, /.env) stay blocked.
+			SecRule REQUEST_HEADERS:Host "@streq drive.{$DOMAIN}" "id:10002,phase:1,pass,nolog,chain"
+			SecRule REQUEST_FILENAME "@beginsWith /cgi-bin/" "t:none,ctl:ruleRemoveById=930130"
+			SecRule REQUEST_HEADERS:Host "@streq drive.{$DOMAIN}" "id:10003,phase:1,pass,nolog,chain"
+			SecRule REQUEST_FILENAME "@beginsWith /cgi-bin/images/" "t:none,ctl:ruleRemoveById=932130,ctl:ruleRemoveById=933135"
 			Include @owasp_crs/*.conf
 			SecRuleEngine {$WAF_MODE}
 			SecAuditEngine RelevantOnly
