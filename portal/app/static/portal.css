@@ -220,6 +220,7 @@ label input, label select { color: var(--text); font-weight: 400; }
 form.inline { display: inline-flex; gap: 8px; margin: 0; align-items: center; }
 .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .filters input { flex: 1 1 180px; }
+.bulk-ack { display: flex; justify-content: flex-end; align-items: center; gap: 12px; margin: -8px 0 12px; }
 
 /* ---- sign-in */
 .login { max-width: 420px; margin: 10vh auto; display: flex; flex-direction: column; gap: 16px; padding: 32px 28px; }
@@ -282,7 +283,7 @@ form.inline { display: inline-flex; gap: 8px; margin: 0; align-items: center; }
 .flowmap .node.internet.ok circle { fill: var(--primary-container); stroke: var(--primary); }
 .flowmap .node.internet.bad circle { fill: var(--bad-container); stroke: var(--bad); }
 .flowmap .node.internet.unknown circle { fill: var(--surface-2); stroke: var(--muted); stroke-dasharray: 4 4; }
-.stale-flow .flowmap .flow { animation: none !important; opacity: .35; }
+.stale-flow .flowmap .flow { animation-play-state: paused !important; opacity: .35; }
 .stale-flow .flowmap .rate { fill: var(--muted); }
 .flowmap .node.firewall rect { fill: var(--primary); stroke: none; }
 .flowmap .node.firewall .title, .flowmap .node.firewall .sub { fill: var(--on-primary); }
@@ -294,18 +295,17 @@ form.inline { display: inline-flex; gap: 8px; margin: 0; align-items: center; }
 .flowmap .rate.up { fill: var(--secondary); }
 .flowmap .lane { fill: none; stroke: var(--surface-3); stroke-width: 6; stroke-linecap: round; }
 .flowmap .lane.devices { stroke-width: 2; stroke-dasharray: 2 4; stroke: var(--outline); }
-.flowmap .flow { fill: none; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 14; }
+/* One endless animation per lane. live.js sets its playbackRate from the rate, so speed changes never
+   restart it; 48 is a whole number of dash periods for both lane styles (16 and 12), so the loop has no seam. */
+.flowmap .flow { fill: none; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 2 14;
+  animation: flow-down 4.8s linear infinite; transition: opacity .6s ease, stroke-width .6s ease; }
+.flowmap .flow.up { animation-name: flow-up; }
 .flowmap .flow.down { stroke: var(--primary); }
 .flowmap .flow.up { stroke: var(--secondary); }
-.flowmap .flow.lvl-0 { opacity: .25; }
-.flowmap .flow.down.lvl-1 { animation: flow-down 3s linear infinite; }
-.flowmap .flow.down.lvl-2 { animation: flow-down 1.2s linear infinite; }
-.flowmap .flow.down.lvl-3 { animation: flow-down .5s linear infinite; stroke-width: 4; }
-.flowmap .flow.up.lvl-1 { animation: flow-up 3s linear infinite; }
-.flowmap .flow.up.lvl-2 { animation: flow-up 1.2s linear infinite; }
-.flowmap .flow.up.lvl-3 { animation: flow-up .5s linear infinite; stroke-width: 4; }
-@keyframes flow-down { to { stroke-dashoffset: -32; } }
-@keyframes flow-up { to { stroke-dashoffset: 32; } }
+.flowmap .flow.lvl-0 { opacity: .25; animation-play-state: paused; }
+.flowmap .flow.down.lvl-3, .flowmap .flow.up.lvl-3 { stroke-width: 4; }
+@keyframes flow-down { to { stroke-dashoffset: -48; } }
+@keyframes flow-up { to { stroke-dashoffset: 48; } }
 @media (prefers-reduced-motion: reduce) { .flowmap .flow, .live .pulse { animation: none !important; } }
 
 .secret { font-size: 18px; letter-spacing: 2px; background: var(--surface-1); padding: 14px; border-radius: 12px; word-break: break-all; }
@@ -633,7 +633,7 @@ svg[data-tips] { cursor: crosshair; }
 .flowmap .arr.up { fill: var(--secondary); }
 .flowmap .node.segment .rate-line { font-size: 11.5px; fill: var(--text); font-variant-numeric: tabular-nums; }
 .stale-flow .flowmap .arr { fill: var(--muted); }
-.device-rates-stale .flowmap .flow.dev { animation: none !important; opacity: .35; }
+.device-rates-stale .flowmap .flow.dev { animation-play-state: paused !important; opacity: .35; }
 .page-hidden .flowmap .flow, .page-hidden .live .pulse,
 .live-paused .flowmap .flow { animation-play-state: paused !important; }
 [data-flow-load-status]:empty { display: none; }

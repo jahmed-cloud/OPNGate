@@ -15,6 +15,26 @@ function matchingLiveClient(client, dataset) {
 function flowLevel(rate, stale) {
   return stale || typeof rate !== "number" || !Number.isFinite(rate) || rate < 2000 ? 0 : rate < 1e6 ? 1 : rate < 25e6 ? 2 : 3;
 }
+// Dash speed follows the rate on a log scale: 1x (10 px/s) at 2 kbit/s up to 8x at 100 Mbit/s and above.
+function flowSpeed(rate) {
+  const t = Math.min(1, Math.max(0, Math.log10(rate / 2000) / Math.log10(100e6 / 2000)));
+  return 1 + 7 * Math.pow(t, 1.5);
+}
+// The lane keeps one running animation; only its playbackRate changes, eased over a few updates, so the
+// dashes speed up and slow down without jumping.
+function setFlow(el, rate, stale) {
+  const level = flowLevel(rate, stale);
+  for (let n = 0; n <= 3; n++) el.classList.toggle(`lvl-${n}`, n === level);
+  if (!level || !el.getAnimations) return;
+  const target = flowSpeed(rate);
+  const speed = el.flowSpeed ? el.flowSpeed + (target - el.flowSpeed) * 0.5 : target;
+  if (el.flowSpeed && Math.abs(speed - el.flowSpeed) < 0.02 && el.flowApplied) return;
+  el.flowSpeed = speed; el.flowApplied = false;
+  for (const animation of el.getAnimations()) {
+    if (animation.updatePlaybackRate) animation.updatePlaybackRate(speed); else animation.playbackRate = speed;
+    el.flowApplied = true;
+  }
+}
 // Real observations only: a bounded browser-session window; long gaps break the lines.
 function liveSeries(points, end) {
   const start = end - 180;
@@ -99,8 +119,7 @@ function startLive() {
     });
     nodes("[data-flow-client-rate]").forEach(el => {
       const client = matchingLiveClient(clients.get(el.dataset.liveClient), el.dataset);
-      const level = flowLevel(client?.[el.dataset.flowClientRate], staleDevices);
-      for (let n = 0; n <= 3; n++) el.classList.toggle(`lvl-${n}`, n === level);
+      setFlow(el, client?.[el.dataset.flowClientRate], staleDevices);
     });
     nodes("[data-live-device-status]").forEach(el => setText(el,
       snapshot.clients_reported_at ? `Devices · ${Math.max(0, Math.floor(deviceAge))} s ago${staleDevices ? " · stale" : ""} · details every 30 s`
@@ -121,8 +140,7 @@ function startLive() {
     nodes("[data-flow-rate]").forEach(el => {
       const iface = snapshot.interfaces?.find(i => i.name === el.dataset.flowInterface);
       const rate = iface?.[el.dataset.flowRate];
-      const level = flowLevel(rate, staleRates || liveFailed);
-      for (let n = 0; n <= 3; n++) el.classList.toggle(`lvl-${n}`, n === level);
+      setFlow(el, rate, staleRates || liveFailed);
     });
     const gatewayAge = snapshot.telemetry_reported_at ? Date.now() / 1000 - snapshot.telemetry_reported_at : Infinity;
     const state = snapshot.gateway_stale || gatewayAge >= 120 ? "stale" : snapshot.gateway?.online === true ? "online" : snapshot.gateway?.online === false ? "offline" : "unknown";
