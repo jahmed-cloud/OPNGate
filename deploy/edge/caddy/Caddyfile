@@ -38,6 +38,14 @@
 	}
 }
 
+# Browsers must stay on HTTPS for every site here, even if they never visited the portal first.
+(hsts) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		defer
+	}
+}
+
 # OWASP Core Rule Set via Coraza. Start in DetectionOnly, tune legitimate traffic, then enable On per site.
 # (give a site its own copy of this snippet with "SecRuleEngine On" to switch only that site).
 (waf) {
@@ -108,6 +116,7 @@
 # *_tls:      same, for upstreams that serve HTTPS with a self-signed certificate (internal hop only).
 (app) {
 	import access_log
+	import hsts
 	route {
 		import cf_only
 		crowdsec
@@ -118,6 +127,7 @@
 
 (admin_app) {
 	import access_log
+	import hsts
 	route {
 		import cf_only
 		crowdsec
@@ -129,6 +139,7 @@
 
 (app_tls) {
 	import access_log
+	import hsts
 	route {
 		import cf_only
 		crowdsec
@@ -158,6 +169,7 @@ drive.{$DOMAIN} {
 # which can't do the portal login; /admin gets the portal login on top.
 vault.{$DOMAIN} {
 	import access_log
+	import hsts
 	route {
 		import cf_only
 		crowdsec
