@@ -289,6 +289,10 @@ def test_forward_auth(client):
     client.cookies.clear()
     r = client.get("/auth/verify", headers={"X-Forwarded-Host": "nas.example.com", "X-Forwarded-Uri": "/x"}, follow_redirects=False)
     assert r.status_code == 302 and "login?next=" in r.headers["location"]
+    from urllib.parse import parse_qs, urlsplit
+    qs = parse_qs(urlsplit(r.headers["location"]).query)
+    from app.auth import _next_signed
+    assert _next_signed(qs["next"][0], qs["ns"][0]) and not _next_signed("https://other.example.com/", qs["ns"][0])
     secret, _ = make_user("fa", role="viewer")
     login_totp(client, "fa", secret)
     r = client.get("/auth/verify")

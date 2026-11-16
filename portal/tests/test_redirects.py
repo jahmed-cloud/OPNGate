@@ -25,13 +25,25 @@ def test_unsafe_return_urls_use_home(monkeypatch, target):
     assert auth._safe_next(target) == "/"
 
 
-@pytest.mark.parametrize("target", [
-    "/", "/clients?show=all", "/alerts?q=failed%20login#latest",
-    "https://example.com/", "https://admin.example.com/settings?tab=users",
-])
-def test_local_and_configured_sibling_return_urls_work(monkeypatch, target):
+@pytest.mark.parametrize("target", ["/", "/clients?show=all", "/alerts?q=failed%20login#latest"])
+def test_local_return_urls_work(monkeypatch, target):
     monkeypatch.setattr(auth, "settings", SimpleNamespace(cookie_domain="example.com"))
     assert auth._safe_next(target) == target
+
+
+@pytest.mark.parametrize("target", ["https://example.com/", "https://admin.example.com/settings?tab=users"])
+def test_sibling_return_urls_need_a_fresh_forward_auth_signature(monkeypatch, tmp_path, target):
+    key = tmp_path / "secret.key"
+    key.write_bytes(b"test-secret")
+    monkeypatch.setattr(auth, "settings", SimpleNamespace(cookie_domain="example.com", secret_key_file=key))
+    sig = auth.sign_next(target)
+    assert auth._safe_next(target, sig) == target
+    # A bare or saved login link (browser history, bookmark) goes to the console instead.
+    assert auth._safe_next(target) == "/"
+    assert auth._safe_next(target, "garbage") == "/"
+    assert auth._safe_next(target, auth.sign_next("https://other.example.com/")) == "/"
+    monkeypatch.setattr(auth.time, "time", lambda: int(sig.split(".")[0]) + auth.NEXT_TTL + 1)
+    assert auth._safe_next(target, sig) == "/"
 
 
 def test_sibling_redirect_needs_a_configured_cookie_domain(monkeypatch):

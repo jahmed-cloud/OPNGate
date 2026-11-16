@@ -9,12 +9,13 @@
   {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <p class="error hidden" id="passkey-error" role="alert"></p>
 
-  <button class="primary wide" id="passkey-login" data-next="{{ next }}">Sign in with security key or passkey</button>
+  <button class="primary wide" id="passkey-login" data-next="{{ next }}" data-ns="{{ ns }}">Sign in with security key or passkey</button>
 
   <div class="divider"><span>or</span></div>
 
   <form method="post" action="/login/password" autocomplete="on">
     <input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="ns" value="{{ ns }}">
     <label>Username <input name="username" autocomplete="username webauthn" required maxlength="64"></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
     <label><span>Authenticator code <small class="muted">or recovery code</small></span>

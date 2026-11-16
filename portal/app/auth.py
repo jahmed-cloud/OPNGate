@@ -4,8 +4,11 @@ Two ways in, never a password on its own:
   1. a passkey / FIDO2 key with user verification, or
   2. password + TOTP code (or a single-use recovery code in place of the code).
 """
+import hashlib
+import hmac
 import json
 import secrets
+import time
 from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -48,8 +51,44 @@ router = APIRouter()
 GENERIC_FAIL = "Sign-in failed. Check your details and try again."
 
 
-def _safe_next(target: str) -> str:
-    """Allow redirects only to this portal or to subdomains covered by forward-auth."""
+# A return URL on another host is honoured only when the forward-auth prompt that produced it signed it,
+# and only for a while. An old /login?next=... from browser history or a bookmark (say, for a site that no
+# longer sits behind the portal) then lands on the console instead of sending the user somewhere else.
+NEXT_TTL = 1800
+
+
+def _next_mac(ts: str, target: str) -> str:
+    key = hashlib.sha256(b"opngate-next|" + settings.secret_key_file.read_bytes().strip()).digest()
+    return hmac.new(key, f"{ts}|{target}".encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def sign_next(target: str) -> str:
+    ts = str(int(time.time()))
+    return f"{ts}.{_next_mac(ts, target)}"
+
+
+def _next_signed(target: str, sig) -> bool:
+    if not isinstance(sig, str) or "." not in sig:
+        return False
+    ts, mac = sig.split(".", 1)
+    if not ts.isdigit() or not 0 <= time.time() - int(ts) <= NEXT_TTL:
+        return False
+    try:
+        return hmac.compare_digest(mac, _next_mac(ts, target))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _portal_hosts() -> set:
+    hosts = set()
+    for ident in (identity.primary(), identity.legacy()):
+        if ident:
+            hosts.add((urlparse(ident.origin).hostname or "").lower())
+    return hosts
+
+
+def _safe_next(target: str, sig: str = "") -> str:
+    """Allow redirects to this portal, or to a sibling subdomain when forward-auth signed the URL recently."""
     # The passkey flow returns this string to location.assign(), whose URL parser
     # treats backslashes as slashes and strips ASCII controls. Reject those before
     # testing for a local path so /\\outside.example cannot become an external URL.
@@ -69,15 +108,15 @@ def _safe_next(target: str) -> str:
         return "/"
     if parsed.scheme == "https" and settings.cookie_domain and (
         host == settings.cookie_domain or host.endswith("." + settings.cookie_domain)
-    ):
+    ) and (host.lower() in _portal_hosts() or _next_signed(target, sig)):
         return target
     return "/"
 
 
-def _login_response(request: Request, user, next_url: str, method: str, json_reply: bool = False):
+def _login_response(request: Request, user, next_url: str, method: str, json_reply: bool = False, sig: str = ""):
     token = create_session(request, user)
     audit("login", True, request, user["username"], method)
-    target = _safe_next(next_url)
+    target = _safe_next(next_url, sig)
     response = JSONResponse({"ok": True, "redirect": target}) if json_reply else RedirectResponse(target, 303)
     set_cookie(response, settings.session_cookie, token, settings.absolute_timeout)
     clear_cookie(response, settings.challenge_cookie)
@@ -98,10 +137,10 @@ def _fail(request: Request, username: str, keys: list, method: str) -> None:
 # ------------------------------------------------------------------ pages
 
 @router.get("/login")
-def login_page(request: Request, next: str = "/"):
+def login_page(request: Request, next: str = "/", ns: str = ""):
     if load_session(request):
-        return RedirectResponse(_safe_next(next), 303)
-    return render(request, "login.html", next=next, error=request.query_params.get("error"))
+        return RedirectResponse(_safe_next(next, ns), 303)
+    return render(request, "login.html", next=next, ns=ns, error=request.query_params.get("error"))
 
 
 @router.post("/login/password")
@@ -111,6 +150,7 @@ async def login_password(
     password: str = Form(...),
     code: str = Form(...),
     next: str = Form("/"),
+    ns: str = Form(""),
 ):
     await check_origin_only(request)
     username = username.strip()[:64]
@@ -118,7 +158,7 @@ async def login_password(
     wait = limiter.check(*keys)
     if wait:
         audit("login_throttled", False, request, username, "password")
-        return render(request, "login.html", next=next, error=f"Too many attempts. Wait {wait} s.", status_code=429)
+        return render(request, "login.html", next=next, ns=ns, error=f"Too many attempts. Wait {wait} s.", status_code=429)
 
     user = db.one("SELECT * FROM users WHERE username=? AND disabled=0", username)
     password_ok = verify_password(user["password_hash"] if user else None, password)
@@ -135,9 +175,9 @@ async def login_password(
             second_ok = verify_totp(user, code)
     if not (user and password_ok and second_ok):
         _fail(request, username, keys, method)
-        return render(request, "login.html", next=next, error=GENERIC_FAIL, status_code=401)
+        return render(request, "login.html", next=next, ns=ns, error=GENERIC_FAIL, status_code=401)
     limiter.success(*keys)
-    return _login_response(request, user, next, method)
+    return _login_response(request, user, next, method, sig=ns)
 
 
 @router.post("/auth/passkey/begin")
@@ -167,7 +207,8 @@ async def passkey_finish(request: Request):
         _fail(request, "", keys, "passkey")
         raise HTTPException(401, GENERIC_FAIL)
     limiter.success(*keys)
-    return _login_response(request, user, body.get("next", "/"), f"passkey:{cred_id[:12]}", json_reply=True)
+    return _login_response(request, user, body.get("next", "/"), f"passkey:{cred_id[:12]}", json_reply=True,
+                           sig=body.get("ns", ""))
 
 
 @router.post("/logout")
@@ -194,7 +235,7 @@ def forward_auth(request: Request, role: str = "viewer"):
     original = f"{proto}://{host}{uri}" if host else "/"
     if session:
         return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
-    return RedirectResponse(f"{identity.current().origin}/login?next={quote(original, safe='')}", 302)
+    return RedirectResponse(f"{identity.current().origin}/login?next={quote(original, safe='')}&ns={sign_next(original)}", 302)
 
 
 # ------------------------------------------------------------------ step-up

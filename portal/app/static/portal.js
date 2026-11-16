@@ -15,7 +15,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bind("passkey-login", async (el) => {
     try {
       const credential = await getAssertion("/auth/passkey/begin");
-      const res = await postJSON("/auth/passkey/finish", { credential, next: el.dataset.next || "/" });
+      const res = await postJSON("/auth/passkey/finish", { credential, next: el.dataset.next || "/", ns: el.dataset.ns || "" });
       window.location.assign(res.redirect || "/");
     } catch (e) { showError("passkey-error", e); }
   });
