@@ -1,5 +1,6 @@
 # Install: cp gw-hostfw.sh /usr/local/sbin/ && cp gw-hostfw@.service /etc/systemd/system/
 #          systemctl enable --now gw-hostfw@edge      (Pi 5)   or   gw-hostfw@services   (Pi 4)
+#          Use gw-hostfw@edge-shared when the edge host also serves the LAN (DNS, shares, other apps).
 [Unit]
 Description=Gateway host firewall (%i)
 After=docker.service

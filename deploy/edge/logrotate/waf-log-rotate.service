@@ -1,0 +1,7 @@
+[Unit]
+Description=Rotate the Coraza WAF audit log
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /usr/local/sbin/waf-log-rotate.sh
