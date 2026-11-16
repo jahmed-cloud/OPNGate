@@ -24,6 +24,10 @@ A valid unauthenticated Vaultwarden API update should reach its ordinary authent
 
 Shipper updates normally arrive every 30 seconds. Confirm the latest engine timestamp and block events on Threats after deployment. Keep watching legitimate use; a fresh heartbeat does not establish that all application workflows have been tested.
 
+## Audit log rotation
+
+Coraza never rotates `coraza-audit.log`. Install the timer in `deploy/edge/logrotate/` to keep it bounded; see [HARDENING.md](HARDENING.md#waf-audit-log-rotation).
+
 ## Rollback and remaining operations
 
 If legitimate traffic is blocked, restore DetectionOnly and recreate Caddy, then tune narrowly by site/path/parameter. Keep the prior file and environment for rollback. Coraza serial audit-log rotation and shipper offset handling remain an operational task documented in SECURITY.md; Caddy's access-log rotation is separate.

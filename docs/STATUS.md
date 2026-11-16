@@ -1,6 +1,6 @@
 # OPNGate project status
 
-Updated: 2026-11-08 (Asia/Calcutta).
+Updated: 2026-11-16 (Asia/Calcutta).
 
 ## User preferences
 
@@ -8,6 +8,15 @@ Updated: 2026-11-08 (Asia/Calcutta).
 - Author and committer: Junaid Ahmed <jahmed.cloud@outlook.com>; no coauthor trailers.
 - Preserve the sidebar layout, orange branding, low-resource operation and existing controls.
 - Deploy authorized updates with saved SSH access while retaining private configuration, PKI, database volumes and signed-action trust.
+
+## Hardening pass (November 16)
+
+- Sign-in: cross-site return URLs are honoured only when forward-auth signed them within 30 minutes; a saved `/login?next=` for another site now opens the console. 181 Python tests pass.
+- Edge: HSTS on every proxied site; the NAS console is behind the portal sign-in again; `gw-hostfw@edge-shared` closes the direct ports of portal-gated apps to the LAN and fences the gateway containers; the Coraza audit log rotates hourly past 50 MiB.
+- Hosts: SSH is key-only on both Pis and the firewall; both Pis install Debian security updates automatically; the portal TLS key is readable only by the container user.
+- OPNsense: the CrowdSec firewall bouncer pulls decisions from the services host (a test ban reached pf in under 25 seconds and cleared on removal); WAN 80/443 pass only from the `CLOUDFLARE_V4` alias.
+- Verified after each change: public sites and forward-auth redirects, Caddy to every upstream, WAF events reaching the portal, telemetry freshness. The Cloudflare-only rule was confirmed from the loaded pf rule, not from an outside network.
+- Steps and undo commands: [HARDENING.md](HARDENING.md).
 
 ## Current release
 
@@ -59,7 +68,8 @@ The November 8 source review adds bounded browser request parsing, typed WebAuth
 - Real hardware confirmation of a new-hostname signed control action; new key enrollment and trust/identity installation are verified, and signature behavior is covered by software-authenticator tests.
 - A clean hardware install using the guided launcher; automated installer checks use simulated hosts.
 - Performance during sustained multi-viewer use and an actual speed test. Prior one-second production measurements remain documented in LIVE_STREAM.md/PERFORMANCE.md; no new speed test is run automatically.
-- Coraza serial audit-log rotation/retention and reliable offset handling across rename/replace rotation.
+- Coraza audit-log rotation is in place (copy and truncate); entries written between the last shipper read and the truncation are not shipped.
+- A check of the Cloudflare-only WAN rule and direct-origin refusal from an outside network.
 - External origin/IPv6/services-listener verification and controlled authentication-load measurements in the revised pentesting plan.
 - Existing action-delivery interruption and DHCP address-reassignment limitations documented in SECURITY.md.
 - Collection runs at a nominal one-second interval; subsecond end-to-end delivery is not promised.

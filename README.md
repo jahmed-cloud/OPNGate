@@ -121,4 +121,4 @@ If OPNGate is useful to you, please [sponsor its development](https://github.com
 
 Built by Junaid Ahmed — [jahmed.cloud](https://jahmed.cloud)
 
-[Metrics](docs/METRICS.md) · [Live stream](docs/LIVE_STREAM.md) · [Performance](docs/PERFORMANCE.md) · [Project status](docs/STATUS.md) · [Blocking guide](docs/BLOCKING.md) · [Security assessment](docs/SECURITY_ASSESSMENT.md) · [Review](REVIEW.md) · [Community announcement](docs/COMMUNITY_POST.md)
+[Hardening](docs/HARDENING.md) · [Metrics](docs/METRICS.md) · [Live stream](docs/LIVE_STREAM.md) · [Performance](docs/PERFORMANCE.md) · [Project status](docs/STATUS.md) · [Blocking guide](docs/BLOCKING.md) · [Security assessment](docs/SECURITY_ASSESSMENT.md) · [Review](REVIEW.md) · [Community announcement](docs/COMMUNITY_POST.md)

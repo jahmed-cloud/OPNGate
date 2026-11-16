@@ -122,7 +122,7 @@ docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 docker compose logs --tail=50 waf-shipper
 ```
 
-On OPNsense configure its CrowdSec bouncer to use services LAPI `http://10.10.0.22:9080` with the dedicated OPNsense key.
+On OPNsense configure its CrowdSec bouncer to use services LAPI `http://10.10.0.22:9080` with the dedicated OPNsense key. The plugin settings, bouncer file and a test ban are in [HARDENING.md](HARDENING.md#opnsense).
 
 **Gate:** Caddy validates with the custom modules, portal TLS trust succeeds, CrowdSec logs parse, and shipper contact appears on Threats. An ordinary login 401/403 must not increase confirmed WAF block counts. Run a harmless test rule/request on a host you own and confirm a Coraza audit match appears. A shipper heartbeat alone does not prove protection.
 
@@ -130,7 +130,7 @@ On OPNsense configure its CrowdSec bouncer to use services LAPI `http://10.10.0.
 
 Use VLAN firewall rules to permit only edge -> services 9443/9080, firewall -> services 9444/9080, and edge -> explicitly listed application upstreams. Block other access to management and LAN segments. Restrict SSH to your admin workstation.
 
-For interim flat-LAN isolation, install `deploy/hostfw/gw-hostfw.sh` and `gw-hostfw@.service` in `/usr/local/sbin/` and `/etc/systemd/system/`, copy hostfw.env.example to `/etc/gw-hostfw.env`, and fill ADMIN_IP, interface, addresses and upstreams. After Docker creates its chains, enable `gw-hostfw@edge` on the edge or `gw-hostfw@services` on services. Keep console access available before testing rules. This script changes iptables chains; inspect existing Docker/firewall policy first. It is not a replacement for VLANs and does not establish IPv6 isolation.
+For interim flat-LAN isolation, install `deploy/hostfw/gw-hostfw.sh` and `gw-hostfw@.service` in `/usr/local/sbin/` and `/etc/systemd/system/`, copy hostfw.env.example to `/etc/gw-hostfw.env`, and fill ADMIN_IP, interface, addresses and upstreams. After Docker creates its chains, enable `gw-hostfw@edge` on the edge or `gw-hostfw@services` on services. If the edge host also serves the LAN (DNS, file shares, other apps), use `gw-hostfw@edge-shared` with `PROTECTED_PORTS`; see [HARDENING.md](HARDENING.md#edge-host-firewall). Keep console access available before testing rules. This script changes iptables chains; inspect existing Docker/firewall policy first. It is not a replacement for VLANs and does not establish IPv6 isolation.
 
 Configure Cloudflare DNS proxying and Full (strict) TLS. Point the required DNS records at your WAN address. Forward WAN IPv4 TCP 80/443 to edge Caddy, and avoid publishing the services ports. Remove competing Nginx Proxy Manager listeners/forwards after migrating each site. Cloudflare Access can be an additional outer gate for browser admin apps; validate it with your passkey/login flow.
 
