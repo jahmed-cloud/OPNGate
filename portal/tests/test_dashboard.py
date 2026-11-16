@@ -214,6 +214,55 @@ def test_alert_filters_and_ack_redirect_stays_local(client):
     assert response.headers["location"] == "/alerts?show=all"
 
 
+def test_acknowledge_all_respects_filters(client):
+    csrf = sign_in(client)
+    db.run("DELETE FROM events")
+    now = db.now()
+    for source, severity, title in (("gateway", "critical", "Internet down"), ("gateway", "info", "Internet back after 3 min"),
+                                    ("suricata", "critical", "IDS test")):
+        db.run("INSERT INTO events(ts,source,severity,title) VALUES (?,?,?,?)", now, source, severity, title)
+    page = client.get("/alerts?source=gateway")
+    assert page.context["open_count"] == 2 and "Acknowledge all 2" in page.text
+    headers = {"Origin": "http://testserver"}
+    assert client.post("/alerts/ack-all", data={"source": "gateway"}, headers=headers).status_code == 403
+    response = client.post("/alerts/ack-all", data={"csrf": csrf, "source": "gateway"}, headers=headers, follow_redirects=False)
+    assert response.status_code == 303 and response.headers["location"] == "/alerts?source=gateway"
+    assert [r["title"] for r in db.q("SELECT title FROM events WHERE acked_at IS NULL")] == ["IDS test"]
+    assert db.one("SELECT detail FROM audit WHERE event='alert_ack_all'")["detail"].startswith("2 alerts")
+    client.post("/alerts/ack-all", data={"csrf": csrf}, headers=headers)
+    assert "Acknowledge all" not in client.get("/alerts").text
+
+
+def test_short_outage_is_recorded_without_alerts(client, monkeypatch):
+    from app import ingest
+    db.run("DELETE FROM events")
+    db.run("DELETE FROM outages")
+    clock = [1_800_000_000]
+    monkeypatch.setattr(db, "now", lambda: clock[0])
+    down, up = {"online": False}, {"online": True}
+    ingest._track_outage(0, down)
+    clock[0] += 60
+    ingest._track_outage(0, down)
+    clock[0] += 30
+    ingest._track_outage(1, up)
+    assert db.one("SELECT COUNT(*) AS n FROM outages WHERE end_ts IS NOT NULL")["n"] == 1
+    assert not db.q("SELECT 1 FROM events")
+
+    clock[0] += 600
+    start = clock[0]
+    ingest._track_outage(0, down)
+    for _ in range(5):
+        clock[0] += 60
+        ingest._track_outage(0, down)
+    events = db.q("SELECT * FROM events")
+    assert len(events) == 1 and events[0]["title"] == "Internet down" and events[0]["ts"] == start
+    assert events[0]["severity"] == "critical" and events[0]["acked_at"] is None
+    ingest._track_outage(1, up)
+    rows = {r["title"]: r for r in db.q("SELECT * FROM events")}
+    assert rows["Internet down"]["acked_by"] == "auto (resolved)"
+    assert rows["Internet back after 5 min"]["severity"] == "info"
+
+
 def test_waf_series_is_seven_utc_days_and_legacy_counts_stay_separate(client):
     sign_in(client)
     today = datetime.fromtimestamp(db.now(), timezone.utc).date()

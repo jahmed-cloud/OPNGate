@@ -272,6 +272,11 @@ def test_telemetry_renders(client, ingest):
     }
     assert ingest.post("/v1/telemetry", json=t).status_code == 200
     assert ingest.post("/v1/telemetry", json={**t, "gateway": {**t["gateway"], "online": False}}).status_code == 200
+    # A dip only becomes an alert once it has lasted; age the open outage and report it down again.
+    from app import db as _db
+    assert not _db.one("SELECT 1 FROM events WHERE title='Internet down'")
+    _db.run("UPDATE outages SET start_ts=start_ts-300 WHERE end_ts IS NULL")
+    assert ingest.post("/v1/telemetry", json={**t, "gateway": {**t["gateway"], "online": False}}).status_code == 200
     assert ingest.post("/v1/events", json={"events": [{"source": "suricata", "severity": "critical", "title": "ET SCAN test"}]}).status_code == 200
 
     secret, _ = make_user("viewer2", role="viewer")

@@ -19,6 +19,7 @@ from .config import settings
 log = logging.getLogger("portal")
 MAX_BODY = 4 * 1024 * 1024
 SEVERITIES = {"info", "warning", "critical"}
+OUTAGE_ALERT_AFTER = 120  # seconds the gateway must stay down before "Internet down" is raised
 
 
 
@@ -148,14 +149,23 @@ async def live_interfaces(request: Request):
 def _track_outage(wan_up: int | None, gw: dict) -> None:
     if wan_up is None:
         return
+    # Every dip is recorded as an outage, but only one that lasts raises an alert: a gateway monitor
+    # flapping on packet loss once produced hundreds of "down"/"back" pairs in a day.
+    now = db.now()
     open_outage = db.one("SELECT id, start_ts FROM outages WHERE end_ts IS NULL ORDER BY id DESC LIMIT 1")
+    alerted = db.kv_get("outage_alerted", "")
     if not wan_up and not open_outage:
-        db.run("INSERT INTO outages(start_ts) VALUES (?)", db.now())
-        add_event("gateway", "critical", "Internet down", gw)
+        db.run("INSERT INTO outages(start_ts) VALUES (?)", now)
+    elif not wan_up and now - open_outage["start_ts"] >= OUTAGE_ALERT_AFTER and alerted != str(open_outage["id"]):
+        add_event("gateway", "critical", "Internet down", gw, ts=open_outage["start_ts"])
+        db.kv_set("outage_alerted", str(open_outage["id"]))
     elif wan_up and open_outage:
-        db.run("UPDATE outages SET end_ts=? WHERE id=?", db.now(), open_outage["id"])
-        minutes = (db.now() - open_outage["start_ts"]) // 60
-        add_event("gateway", "warning", f"Internet back after {minutes} min", gw)
+        db.run("UPDATE outages SET end_ts=? WHERE id=?", now, open_outage["id"])
+        if alerted == str(open_outage["id"]):
+            # The outage is over, so its alert no longer needs anyone; the "back" entry keeps the record.
+            db.run("UPDATE events SET acked_by='auto (resolved)', acked_at=? WHERE source='gateway' AND title='Internet down' "
+                   "AND acked_at IS NULL AND ts=?", now, open_outage["start_ts"])
+            add_event("gateway", "info", f"Internet back after {(now - open_outage['start_ts']) // 60} min", gw)
 
 
 def _merge_clients(clients: list, now: int) -> None:

@@ -9,7 +9,7 @@ import json
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from .common import _json, _like
 
 router = APIRouter()
@@ -100,17 +100,16 @@ def threats(request: Request, session: Session = Depends(require_user)):
     )
 
 
-@router.get("/alerts")
-def alerts(request: Request, session: Session = Depends(require_user)):
-    term = request.query_params.get("q", "").strip()[:200]
-    show = "all" if request.query_params.get("show") == "all" else "open"
-    severities = ["info", "warning", "critical"]
-    severity = request.query_params.get("severity", "")
-    severity = severity if severity in severities else ""
-    source = request.query_params.get("source", "")[:100]
-    sql, args = "SELECT * FROM events WHERE 1=1", []
-    if show == "open":
-        sql += " AND acked_at IS NULL"
+ALERT_SEVERITIES = ["info", "warning", "critical"]
+
+
+def _alert_filter(params) -> tuple[str, list, dict]:
+    """WHERE clause for the Alerts filters, shared by the list and by acknowledge-all."""
+    term = str(params.get("q", "")).strip()[:200]
+    severity = str(params.get("severity", ""))
+    severity = severity if severity in ALERT_SEVERITIES else ""
+    source = str(params.get("source", ""))[:100]
+    sql, args = "", []
     if term:
         sql += " AND (title LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\')"
         args += [_like(term)] * 3
@@ -120,10 +119,33 @@ def alerts(request: Request, session: Session = Depends(require_user)):
     if source:
         sql += " AND source=?"
         args.append(source)
-    rows = db.q(sql + " ORDER BY ts DESC LIMIT 300", *args)
+    return sql, args, {"q": term, "severity": severity, "source": source}
+
+
+@router.get("/alerts")
+def alerts(request: Request, session: Session = Depends(require_user)):
+    show = "all" if request.query_params.get("show") == "all" else "open"
+    where, args, chosen = _alert_filter(request.query_params)
+    open_only = " AND acked_at IS NULL"
+    rows = db.q("SELECT * FROM events WHERE 1=1" + (open_only if show == "open" else "") + where
+                + " ORDER BY ts DESC LIMIT 300", *args)
+    open_count = db.one("SELECT COUNT(*) AS n FROM events WHERE 1=1" + open_only + where, *args)["n"]
     sources = [row["source"] for row in db.q("SELECT DISTINCT source FROM events ORDER BY source LIMIT 100")]
-    return render(request, "alerts.html", session=session, rows=rows, q=term, show=show, severity=severity,
-                  source=source, sources=sources, severities=severities, refresh=30)
+    return render(request, "alerts.html", session=session, rows=rows, show=show, sources=sources,
+                  severities=ALERT_SEVERITIES, open_count=open_count, refresh=30, **chosen)
+
+
+@router.post("/alerts/ack-all")
+async def ack_all(request: Request, session: Session = Depends(require_user)):
+    """Acknowledge every open alert that matches the filters the page was showing."""
+    await check_csrf(request, session)
+    form = await request.form()
+    where, args, chosen = _alert_filter(form)
+    cur = db.run("UPDATE events SET acked_by=?, acked_at=? WHERE acked_at IS NULL" + where, session.username, db.now(), *args)
+    audit("alert_ack_all", True, request, session.username,
+          f"{cur.rowcount} alerts; " + (", ".join(f"{k}={v}" for k, v in chosen.items() if v) or "no filter"))
+    query = urlencode({k: v for k, v in chosen.items() if v})
+    return RedirectResponse("/alerts" + ("?" + query if query else ""), 303)
 
 
 @router.post("/alerts/{event_id}/ack")

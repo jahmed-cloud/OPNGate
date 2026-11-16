@@ -11,6 +11,12 @@
     <button>Filter</button>
   </form>
 </div>
+{% if open_count %}<form class="bulk-ack" method="post" action="/alerts/ack-all">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="q" value="{{ q }}">
+  <input type="hidden" name="severity" value="{{ severity }}"><input type="hidden" name="source" value="{{ source }}">
+  <span class="muted small">{{ "{:,}".format(open_count) }} open{{ ' matching these filters' if q or severity or source }}</span>
+  <button class="small">Acknowledge all {{ "{:,}".format(open_count) }}</button>
+</form>{% endif %}
 <section class="card scroll">
 <table>
   <thead><tr><th>Time</th><th>Source</th><th>Severity</th><th>Event</th><th></th></tr></thead>
